@@ -1,0 +1,16 @@
+{
+    "source_file": "c:/Users/rahul/OneDrive/Desktop/data-pipe-line-github/streamlit_prefect_pipeline/data/uploads/test.csv",
+    "rename_mapping": {
+        "MyProduct": "product_name",
+        "Amt": "unit_price"
+    },
+    "static_mapping": {
+        "manual_source": "test_static_value"
+    },
+    "keep_columns": [
+        "product_name",
+        "unit_price",
+        "manual_source"
+    ],
+    "original_filename": "test.csv"
+}

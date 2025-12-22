@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+*.env
+.streamlit/secrets.toml
+
+# Data (Don't commit large csvs)
+streamlit_prefect_pipeline/data/uploads/
+streamlit_prefect_pipeline/data/outputs/
+*.csv
+!streamlit_prefect_pipeline/data/configs/   # Keep configs if needed, or ignore if they contain secrets (usually just check ids)
+# For now, let's keep configs as they are just mappings.
+
+# Build
+node_modules/

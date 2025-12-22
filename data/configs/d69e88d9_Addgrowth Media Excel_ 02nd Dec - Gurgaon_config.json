@@ -1,0 +1,25 @@
+{
+    "source_file": "C:\\Users\\rahul\\OneDrive\\Desktop\\check-git-main\\streamlit-prefect-pipeline\\streamlit_prefect_pipeline\\data\\uploads\\d69e88d9_Addgrowth Media Excel_ 02nd Dec - Gurgaon.csv",
+    "rename_mapping": {
+        "S.NO": "billboard_id",
+        "Latitude": "latitude",
+        "Longitude": "longitude",
+        "Cost per month": "height_ft",
+        "Illumination": "lighting_type",
+        "Media Location": "format_type",
+        "Location": "location",
+        "Image url": "image_urls"
+    },
+    "static_mapping": {},
+    "keep_columns": [
+        "billboard_id",
+        "location",
+        "height_ft",
+        "lighting_type",
+        "latitude",
+        "format_type",
+        "longitude",
+        "image_urls"
+    ],
+    "original_filename": "Addgrowth Media Excel_ 02nd Dec - Gurgaon.csv"
+}

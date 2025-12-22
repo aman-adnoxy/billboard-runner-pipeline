@@ -1,0 +1,5 @@
+streamlit
+prefect
+pandas
+numpy
+python-dotenv

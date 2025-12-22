@@ -1,0 +1,16 @@
+{
+    "name": "streamlit-prefect-pipeline",
+    "version": "1.0.0",
+    "description": "Bridge for Streamlit + Prefect using NPM Commands",
+    "scripts": {
+        "postinstall": "pip install -r requirements.txt",
+        "dev": "streamlit run ui/app.py"
+    },
+    "keywords": [
+        "streamlit",
+        "prefect",
+        "python"
+    ],
+    "author": "Antigravity",
+    "license": "ISC"
+}

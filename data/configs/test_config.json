@@ -1,0 +1,18 @@
+{
+    "source_file": "c:/Users/rahul/OneDrive/Desktop/data-pipe-line-github/streamlit_prefect_pipeline/data/uploads/test.csv",
+    "mapping": {
+        "MyProduct": "Product_Name",
+        "Amt": "Unit_Price",
+        "Where": "Region",
+        "Inventory": "Quantity"
+    },
+    "target_schema": [
+        "Date",
+        "Product_Name",
+        "Quantity",
+        "Unit_Price",
+        "Customer_Name",
+        "Region"
+    ],
+    "original_filename": "test.csv"
+}
