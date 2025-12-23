@@ -1,0 +1,129 @@
+{
+    "billboard_id": {
+        "label": "Billboard ID *",
+        "aliases": [
+            "id",
+            "assetid",
+            "asset_id",
+            "code",
+            "s.no",
+            "sno",
+            "serial_no"
+        ]
+    },
+    "latitude": {
+        "label": "Latitude",
+        "aliases": [
+            "lat",
+            "latitude"
+        ]
+    },
+    "longitude": {
+        "label": "Longitude",
+        "aliases": [
+            "long",
+            "lng",
+            "longitude"
+        ]
+    },
+    "width_ft": {
+        "label": "Width (ft)",
+        "aliases": [
+            "width",
+            "w"
+        ]
+    },
+    "height_ft": {
+        "label": "Height (ft)",
+        "aliases": [
+            "height",
+            "h"
+        ]
+    },
+    "quantity": {
+        "label": "Quantity",
+        "aliases": [
+            "qty",
+            "quantity",
+            "units",
+            "no_of_units"
+        ]
+    },
+    "lighting_type": {
+        "label": "Lighting",
+        "aliases": [
+            "lighting",
+            "light",
+            "illumination",
+            "type",
+            "illumination_type"
+        ]
+    },
+    "format_type": {
+        "label": "Format Type *",
+        "aliases": [
+            "media_type",
+            "format",
+            "media",
+            "category",
+            "type_of_media",
+            "media_category",
+            "asset_type"
+        ]
+    },
+    "location": {
+        "label": "Location",
+        "aliases": [
+            "address",
+            "landmark",
+            "location_name",
+            "loc"
+        ]
+    },
+    "image_urls": {
+        "label": "Image URL",
+        "aliases": [
+            "image",
+            "photo",
+            "url",
+            "img",
+            "media_image"
+        ]
+    },
+    "coordinates": {
+        "label": "Coordinates (Lat, Long)",
+        "aliases": [
+            "coordinates",
+            "coords",
+            "lat_long",
+            "latlong"
+        ]
+    },
+    "dimensions": {
+        "label": "Dimensions (WxH)",
+        "aliases": [
+            "dimensions",
+            "dims",
+            "size",
+            "w_h"
+        ]
+    },
+    "minimal_price": {
+        "label": "Minimal Price",
+        "aliases": [
+            "price",
+            "min_price",
+            "rate",
+            "cost",
+            "mrp"
+        ]
+    },
+    "locality": {
+        "label": "Locality",
+        "aliases": [
+            "locality",
+            "neighborhood",
+            "area_raw"
+        ]
+    }
+}

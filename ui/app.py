@@ -4,65 +4,66 @@ import os
 import json
 import uuid
 import sys
+import subprocess
+from dotenv import load_dotenv
 
-# Add parent directory to path to allow importing orchestration if needed directly (optional validation)
+# --- Import from SRC ---
+# Add parent directory to path to allow importing src
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configuration
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
-CONFIG_DIR = os.path.join(DATA_DIR, "configs")
-OUTPUT_DIR = os.path.join(DATA_DIR, "outputs")
+from src.config import REQUIRED_FIELDS, BUCKET_INPUT, BUCKET_MAPPING, BUCKET_OUTPUT, load_required_fields
+from src.database import get_supabase_client
 
-# Ensure directories exist
-for d in [DATA_DIR, UPLOAD_DIR, CONFIG_DIR, OUTPUT_DIR]:
-    os.makedirs(d, exist_ok=True)
+# Initialize Supabase
+supabase = get_supabase_client()
 
-# 1. New Standard Fields (User Requested)
-REQUIRED_FIELDS = {
-    'billboard_id': {'label': 'Billboard ID *', 'aliases': ['id', 'assetid', 'asset_id', 'code', 's.no', 'sno', 'serial_no']},
-    'latitude': {'label': 'Latitude', 'aliases': ['lat', 'latitude']},
-    'longitude': {'label': 'Longitude', 'aliases': ['long', 'lng', 'longitude']},
-    'width_ft': {'label': 'Width (ft)', 'aliases': ['width', 'w']},
-    'height_ft': {'label': 'Height (ft)', 'aliases': ['height', 'h']},
-    'quantity': {'label': 'Quantity', 'aliases': ['qty', 'quantity', 'units', 'no_of_units']},
-    'lighting_type': {'label': 'Lighting', 'aliases': ['lighting', 'light', 'illumination', 'type', 'illumination_type']},
-    'format_type': {'label': 'Format Type *', 'aliases': ['media_type', 'format', 'media', 'category', 'type_of_media']},
-    'location': {'label': 'Location', 'aliases': ['address', 'landmark', 'location_name', 'loc']},
-    'image_urls': {'label': 'Image URL', 'aliases': ['image', 'photo', 'url', 'img', 'media_image']}
-}
+# Re-load fields dynamically if needed or use imported constant
+REQUIRED_FIELDS = load_required_fields()
 
-def save_uploaded_file(uploaded_file):
+def save_uploaded_file_to_supabase(uploaded_file):
     file_id = str(uuid.uuid4())[:8]
     file_name = f"{file_id}_{uploaded_file.name}"
-    file_path = os.path.join(UPLOAD_DIR, file_name)
     
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    return file_path, file_name
+    try:
+        file_bytes = uploaded_file.getvalue()
+        res = supabase.storage.from_(BUCKET_INPUT).upload(
+            path=file_name,
+            file=file_bytes,
+            file_options={"content-type": uploaded_file.type}
+        )
+        return file_name
+    except Exception as e:
+        st.error(f"Supabase Upload Error: {e}")
+        return None
 
 def main():
     st.set_page_config(page_title="Data Import Pipeline", layout="wide")
     st.title("CSV Import & Mapping Pipeline")
 
     with st.expander("System Status", expanded=True):
-        st.write(f"📂 Upload Directory: `{UPLOAD_DIR}`")
-        st.write(f"⚙️ Config Directory: `{CONFIG_DIR}`")
+        st.write(f"☁️ Storage: Supabase")
+        st.write(f"📦 Buckets: `{BUCKET_INPUT}`, `{BUCKET_MAPPING}`, `{BUCKET_OUTPUT}`")
 
     # Initialize session state for custom columns
     if "custom_columns" not in st.session_state:
         st.session_state.custom_columns = []
 
     # 1. CSV Upload
-    st.header("1. Upload CSV")
-    uploaded_file = st.file_uploader("Upload your data CSV", type=["csv"])
+    st.header("1. Upload Data")
+    uploaded_file = st.file_uploader("Upload your data (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
     if uploaded_file is not None:
         try:
-            # We need to seek to 0 if re-reading
             uploaded_file.seek(0)
-            df = pd.read_csv(uploaded_file)
+            if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(uploaded_file)
+            else:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, encoding='cp1252')
+            
             st.success(f"Loaded {len(df)} rows.")
             
             # Clean headers
@@ -72,7 +73,6 @@ def main():
                 st.dataframe(df.head())
             
             source_columns = df.columns.tolist()
-            # Options: (Skip), (Manual Input), [All source columns...]
             col_options = ["(Select Column)"] + sorted(source_columns)
             
             # 2. Column Mapping
@@ -88,52 +88,175 @@ def main():
             # Use columns to lay out nicely
             cols = st.columns(2)
             
-            # Iterate through standard required fields
-            for i, (field_key, config) in enumerate(REQUIRED_FIELDS.items()):
-                col = cols[i % 2]
-                
-                # Auto-detection logic
-                default_index = 0
-                
-                # Check for exact match first
-                if field_key in source_columns:
-                     default_index = col_options.index(field_key)
-                else:
-                    # Check aliases
-                    found = False
-                    for alias in config['aliases']:
+            # Helper for auto-mapping
+            def get_default_index(key, conf):
+                if key in source_columns:
+                    return col_options.index(key)
+                if 'aliases' in conf:
+                    for alias in conf['aliases']:
                         for raw_col in source_columns:
                             clean_col = str(raw_col).lower().replace(' ', '_').replace('.', '')
                             if alias in clean_col:
-                                default_index = col_options.index(raw_col)
-                                found = True
-                                break
-                        if found: break
+                                return col_options.index(raw_col)
+                return 0
+
+            # Layout tracking
+            layout_idx = 0
+            coord_keys = ['latitude', 'longitude', 'coordinates']
+            dim_keys = ['width_ft', 'height_ft', 'dimensions']
+            
+            location_block_rendered = False
+            dimension_block_rendered = False
+            
+            # Iterate through standard required fields
+            for field_key, config in REQUIRED_FIELDS.items():
+                
+                # Special handling for Coordinate/Location fields
+                if field_key in coord_keys:
+                    if location_block_rendered:
+                        continue
+                    
+                    # Render Location Block
+                    col = cols[layout_idx % 2]
+                    with col:
+                        with st.container(border=True):
+                            st.markdown("**Location Mapping**")
+                            loc_mode = st.radio(
+                                "Coordinate Format",
+                                ["Separate Columns (Lat/Long)", "Single Column (Coordinates)"],
+                                horizontal=True,
+                                key="loc_mode_radio",
+                                label_visibility="collapsed"
+                            )
+                            
+                            if loc_mode == "Single Column (Coordinates)":
+                                c_conf = REQUIRED_FIELDS.get('coordinates', {})
+                                c_idx = get_default_index('coordinates', c_conf)
+                                sel = st.selectbox(
+                                    f"{c_conf.get('label', 'Coordinates')} (coordinates)", 
+                                    col_options, 
+                                    index=c_idx, 
+                                    key="std_coordinates"
+                                )
+                                if sel != "(Select Column)":
+                                    rename_mapping[sel] = "coordinates"
+                            else:
+                                sub_c1, sub_c2 = st.columns(2)
+                                with sub_c1:
+                                    # Latitude
+                                    l_conf = REQUIRED_FIELDS.get('latitude', {})
+                                    l_idx = get_default_index('latitude', l_conf)
+                                    sel_lat = st.selectbox(
+                                        f"{l_conf.get('label', 'Latitude')}", 
+                                        col_options, 
+                                        index=l_idx, 
+                                        key="std_latitude"
+                                    )
+                                    if sel_lat != "(Select Column)":
+                                        rename_mapping[sel_lat] = "latitude"
+                                with sub_c2:
+                                    # Longitude
+                                    g_conf = REQUIRED_FIELDS.get('longitude', {})
+                                    g_idx = get_default_index('longitude', g_conf)
+                                    sel_long = st.selectbox(
+                                        f"{g_conf.get('label', 'Longitude')}", 
+                                        col_options, 
+                                        index=g_idx, 
+                                        key="std_longitude"
+                                    )
+                                    if sel_long != "(Select Column)":
+                                        rename_mapping[sel_long] = "longitude"
+                    
+                    location_block_rendered = True
+                    layout_idx += 1
+                    continue
+
+                # Special handling for Dimension fields
+                if field_key in dim_keys:
+                    if dimension_block_rendered:
+                        continue
+                    
+                    # Render Dimension Block
+                    col = cols[layout_idx % 2]
+                    with col:
+                        with st.container(border=True):
+                            st.markdown("**Dimension Mapping**")
+                            dim_mode = st.radio(
+                                "Dimension Format",
+                                ["Separate Columns (WxH)", "Single Column (Dimensions)"],
+                                horizontal=True,
+                                key="dim_mode_radio",
+                                label_visibility="collapsed"
+                            )
+                            
+                            if dim_mode == "Single Column (Dimensions)":
+                                d_conf = REQUIRED_FIELDS.get('dimensions', {})
+                                d_idx = get_default_index('dimensions', d_conf)
+                                sel_dim = st.selectbox(
+                                    f"{d_conf.get('label', 'Dimensions')} (dimensions)", 
+                                    col_options, 
+                                    index=d_idx, 
+                                    key="std_dimensions"
+                                )
+                                if sel_dim != "(Select Column)":
+                                    rename_mapping[sel_dim] = "dimensions"
+                            else:
+                                sub_d1, sub_d2 = st.columns(2)
+                                with sub_d1:
+                                    # Width
+                                    w_conf = REQUIRED_FIELDS.get('width_ft', {})
+                                    w_idx = get_default_index('width_ft', w_conf)
+                                    sel_width = st.selectbox(
+                                        f"{w_conf.get('label', 'Width')}", 
+                                        col_options, 
+                                        index=w_idx, 
+                                        key="std_width"
+                                    )
+                                    if sel_width != "(Select Column)":
+                                        rename_mapping[sel_width] = "width_ft"
+                                with sub_d2:    
+                                    # Height
+                                    h_conf = REQUIRED_FIELDS.get('height_ft', {})
+                                    h_idx = get_default_index('height_ft', h_conf)
+                                    sel_height = st.selectbox(
+                                        f"{h_conf.get('label', 'Height')}", 
+                                        col_options, 
+                                        index=h_idx, 
+                                        key="std_height"
+                                    )
+                                    if sel_height != "(Select Column)":
+                                        rename_mapping[sel_height] = "height_ft"
+                    
+                    dimension_block_rendered = True
+                    layout_idx += 1
+                    continue
+
+                # Standard Fields
+                col = cols[layout_idx % 2]
+                d_idx = get_default_index(field_key, config)
                 
                 with col:
                     selection = st.selectbox(
-                        f"{config['label']} ({field_key})",
-                        options=col_options,
-                        index=default_index,
+                        f"{config['label']} ({field_key})", 
+                        options=col_options, 
+                        index=d_idx, 
                         key=f"std_{field_key}"
                     )
                     
                     if selection != "(Select Column)":
                         rename_mapping[selection] = field_key
+                
+                layout_idx += 1
 
             # --- CUSTOM COLUMNS ---
             st.write("---")
             st.subheader("Custom Columns")
             
-            # Button to add new custom column
             if st.button("+ Add Custom Column"):
                 st.session_state.custom_columns.append({"id": str(uuid.uuid4())})
             
-            # Render input rows for custom columns
-            # We need to collect these values
             custom_column_data = [] # List of (target_name, source_selection, manual_value)
             
-            # We iterate over session state to render persistent widgets
             for idx, c_item in enumerate(st.session_state.custom_columns):
                 c_col1, c_col2, c_col3, c_col4 = st.columns([2, 2, 2, 1])
                 
@@ -143,13 +266,7 @@ def main():
                     current_options = ["(Select Column)", "(Manual Input)"] + sorted(source_columns)
                     source_sel = st.selectbox(f"Map From #{idx+1}", options=current_options, key=f"custom_src_{c_item['id']}")
                 with c_col3:
-                    # Show manual input only if (Manual Input) selected or for clarity always enable but ignore if mapping selected?
-                    # The prompt implied conditional visibility, but simple text input is easier.
-                    manual_val = ""
-                    # if source_sel == "(Manual Input)":
                     manual_val = st.text_input(f"Static Value #{idx+1}", key=f"custom_val_{c_item['id']}")
-                    # else:
-                    #     st.empty() # Placeholder
                 with c_col4:
                     if st.button("x", key=f"del_{c_item['id']}"):
                         st.session_state.custom_columns.pop(idx)
@@ -162,17 +279,14 @@ def main():
             st.write("---")
             st.subheader("Preview Mapped Data")
             
-            # Calculate Preview on the fly
             try:
-                # 1. Prepare mappings (Same logic as save)
                 preview_rename = rename_mapping.copy()
                 preview_static = static_mapping.copy()
                 preview_keep = list(rename_mapping.values())
 
                 for t_name, s_sel, m_val in custom_column_data:
-                    clean_target = t_name.strip().lower().replace(" ", "_")
+                    clean_target = t_name.strip()
                     if not clean_target: continue
-                    
                     if s_sel == "(Manual Input)":
                         preview_static[clean_target] = m_val
                         preview_keep.append(clean_target)
@@ -180,20 +294,10 @@ def main():
                         preview_rename[s_sel] = clean_target
                         preview_keep.append(clean_target)
                 
-                # 2. Apply to head
                 df_preview = df.head().copy()
                 df_preview = df_preview.rename(columns=preview_rename)
-                
                 for col, val in preview_static.items():
                     df_preview[col] = val
-                
-                # Filter to only kept columns (handle missing if any logic requires it, but for preview just show what we have)
-                # We need to be careful: the 'keep' list has target names. 
-                # df_preview columns are now a mix of Original (unmapped) and Target (mapped)
-                
-                # Let's filter to show ONLY the target structure if possible, 
-                # or just show the whole thing with mapped columns highlighted?
-                # User usually wants to see the RESULT.
                 
                 available_preview_cols = [c for c in list(set(preview_keep)) if c in df_preview.columns]
                 if available_preview_cols:
@@ -208,16 +312,13 @@ def main():
             st.header("3. Execution")
             
             if st.button("Save Configuration & Run Pipeline", type="primary"):
-                # Prepare final mappings
                 final_rename_map = rename_mapping.copy()
                 final_static_map = static_mapping.copy()
-                keep_columns = list(rename_mapping.values()) # Standard columns actively mapped
+                keep_columns = list(rename_mapping.values())
                 
-                # Process Custom Cols
                 for t_name, s_sel, m_val in custom_column_data:
-                    clean_target = t_name.strip().lower().replace(" ", "_")
+                    clean_target = t_name.strip()
                     if not clean_target: continue
-                    
                     if s_sel == "(Manual Input)":
                         final_static_map[clean_target] = m_val
                         keep_columns.append(clean_target)
@@ -226,51 +327,63 @@ def main():
                         keep_columns.append(clean_target)
 
                 # Save CSV
-                saved_path, saved_filename = save_uploaded_file(uploaded_file)
-                st.toast(f"File saved to {saved_filename}")
+                saved_filename = save_uploaded_file_to_supabase(uploaded_file)
+                
+                if saved_filename:
+                    st.toast(f"File uploaded to Supabase: {saved_filename}")
 
-                # Save Mapping
-                mapping_filename = saved_filename.replace(".csv", "_config.json")
-                config_path = os.path.join(CONFIG_DIR, mapping_filename)
-                
-                config_data = {
-                    "source_file": saved_path,
-                    "rename_mapping": final_rename_map,   # {src: tgt}
-                    "static_mapping": final_static_map,   # {tgt: val}
-                    "keep_columns": list(set(keep_columns)), # [tgt1, tgt2...]
-                    "original_filename": uploaded_file.name
-                }
-                
-                with open(config_path, "w") as f:
-                    json.dump(config_data, f, indent=4)
-                st.toast("Mapping configuration saved.")
+                    # Save Config
+                    mapping_filename = saved_filename.replace(".csv", "_config.json")
+                    config_data = {
+                        "source_file": saved_filename,
+                        "rename_mapping": final_rename_map,
+                        "static_mapping": final_static_map,
+                        "keep_columns": list(set(keep_columns)),
+                        "original_filename": uploaded_file.name
+                    }
+                    
+                    try:
+                        config_json = json.dumps(config_data, indent=4)
+                        res = supabase.storage.from_(BUCKET_MAPPING).upload(
+                            path=mapping_filename,
+                            file=config_json.encode('utf-8'),
+                            file_options={"content-type": "application/json"}
+                        )
+                        st.toast("Mapping configuration saved.")
+                    except Exception as e:
+                        st.error(f"Failed to save config: {e}")
+                        st.stop()
 
-                # Trigger Prefect
-                st.write("---")
-                st.subheader("🚀 Triggering Orchestration")
-                
-                import subprocess
-                cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "orchestration", "flow.py"), config_path]
-                
-                with st.spinner("Running Prefect Flow..."):
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    st.success("Pipeline executed successfully!")
+                    # Trigger Prefect
+                    st.write("---")
+                    st.subheader("🚀 Triggering Orchestration")
                     
-                    # Extract Dashboard URL
-                    import re
-                    dashboard_match = re.search(r"Prefect Flow Run URL: (https?://[^\s]+)", result.stdout)
+                    cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "orchestration", "flow.py"), mapping_filename]
+                    with st.spinner("Running Prefect Flow..."):
+                        result = subprocess.run(cmd, capture_output=True, text=True)
                     
-                    if dashboard_match:
-                        dashboard_url = dashboard_match.group(1)
-                        st.link_button("👉 View Run in Prefect Cloud", url=dashboard_url, type="primary")
-                    
-                    with st.expander("Execution Logs"):
-                        st.code(result.stdout)
+                    if result.returncode == 0:
+                        st.success("Pipeline executed successfully!")
+                        import re
+                        # Prefect logs often go to stderr, and standard format is "View at http..."
+                        # Check both just in case
+                        combined_output = (result.stdout or "") + "\n" + (result.stderr or "")
+                        
+                        dashboard_match = re.search(r"View at (https?://[^\s]+)", combined_output)
+                        
+                        if dashboard_match:
+                            dashboard_url = dashboard_match.group(1)
+                            # Clean up trailing characters if any (like ANSI colors hidden or punctuation)
+                            dashboard_url = dashboard_url.rstrip('.')
+                            st.link_button("👉 View Run in Prefect Cloud", url=dashboard_url, type="primary")
+                        
+                        with st.expander("Execution Logs"):
+                            st.code(combined_output)
+                    else:
+                        st.error("Pipeline failed!")
+                        st.code(result.stderr)
                 else:
-                    st.error("Pipeline failed!")
-                    st.code(result.stderr)
+                    st.error("Upload failed, cannot proceed.")
                     
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
