@@ -1,0 +1,21 @@
+{
+    "billboard_id": { "required": true, "type": "string" },
+    "locality": { "required": true, "type": "string" },
+    "lat": { "required": true, "type": "float" },
+    "lon": { "required": true, "type": "float" },
+    "width_ft": { "required": true, "type": "float" },
+    "height_ft": { "required": true, "type": "float" },
+    "frequency_per_minute": { "required": true, "type": "integer" },
+    "quantity": { "required": true, "type": "integer" },
+    "lighting_type": { "required": true, "type": "string" },
+    "format_type": { "required": true, "type": "string" },
+    "city": { "required": true, "type": "string" },
+    "area": { "required": true, "type": "string" },
+    "district": { "required": true, "type": "string" },
+    "location": { "required": true, "type": "string" },
+    "base_rate_per_month": { "required": true, "type": "float" },
+    "base_rate_per_unit": { "required": true, "type": "float" },
+    "card_rate_per_month": { "required": true, "type": "float" },
+    "card_rate_per_unit": { "required": true, "type": "float" },
+    "image_urls": { "required": true, "type": "string" }
+}

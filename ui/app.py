@@ -20,6 +20,17 @@ supabase = get_supabase_client()
 # Re-load fields dynamically if needed or use imported constant
 REQUIRED_FIELDS = load_required_fields()
 
+# --- NEW: Helper to Load Validation Schema ---
+def load_validation_schema():
+    """Loads the output validation schema from config folder."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(base_dir, "config", "output_validation.json")
+    
+    if os.path.exists(config_path):
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    return None
+
 def save_uploaded_file_to_supabase(uploaded_file):
     file_id = str(uuid.uuid4())[:8]
     file_name = f"{file_id}_{uploaded_file.name}"
@@ -41,8 +52,8 @@ def main():
     st.title("CSV Import & Mapping Pipeline")
 
     with st.expander("System Status", expanded=True):
-        st.write(f"☁️ Storage: Supabase")
-        st.write(f"📦 Buckets: `{BUCKET_INPUT}`, `{BUCKET_MAPPING}`, `{BUCKET_OUTPUT}`")
+        st.write(f" Storage: Supabase")
+        st.write(f" Buckets: `{BUCKET_INPUT}`, `{BUCKET_MAPPING}`, `{BUCKET_OUTPUT}`")
 
     # Initialize session state for custom columns
     if "custom_columns" not in st.session_state:
@@ -275,10 +286,13 @@ def main():
                 if target_name:
                     custom_column_data.append((target_name, source_sel, manual_val))
 
-            # --- PREVIEW MAPPED DATA ---
+            # --- PREVIEW MAPPED DATA & VALIDATION ---
             st.write("---")
-            st.subheader("Preview Mapped Data")
+            st.subheader("Preview & Validation")
             
+            validation_passed = False # Default state
+            available_cols = []
+
             try:
                 preview_rename = rename_mapping.copy()
                 preview_static = static_mapping.copy()
@@ -294,69 +308,85 @@ def main():
                         preview_rename[s_sel] = clean_target
                         preview_keep.append(clean_target)
                 
-                df_preview = df.head().copy()
-                df_preview = df_preview.rename(columns=preview_rename)
-                for col, val in preview_static.items():
-                    df_preview[col] = val
-                
-                available_preview_cols = [c for c in list(set(preview_keep)) if c in df_preview.columns]
-                if available_preview_cols:
-                    st.dataframe(df_preview[available_preview_cols])
-                else:
-                    st.warning("No columns mapped yet.")
-                    
-            except Exception as e:
-                st.error(f"Could not preview: {e}")
-
-# --- DOWNLOAD BUTTONS ---
-            st.write("---")
-            st.subheader(" Download Mapped Data")
-            
-            try:
-                # Same logic as preview to get the full mapped data
                 df_final = df.copy()
                 df_final = df_final.rename(columns=preview_rename)
                 for col, val in preview_static.items():
                     df_final[col] = val
                 
-                # Sirf mapped columns hi select karna
-                final_cols = [c for c in list(set(preview_keep)) if c in df_final.columns]
-                if final_cols:
-                    df_download = df_final[final_cols]
+                # Filter to show only mapped columns
+                available_cols = [c for c in list(set(preview_keep)) if c in df_final.columns]
+                
+                if available_cols:
+                    st.dataframe(df_final[available_cols].head())
                     
-                    d_col1, d_col2 = st.columns(2)
+                    # --- NEW: VALIDATION CHECK LOGIC ---
+                    schema = load_validation_schema()
                     
-                    # 1. CSV Download
-                    csv = df_download.to_csv(index=False).encode('utf-8')
-                    d_col1.download_button(
-                        label="Download as CSV",
-                        data=csv,
-                        file_name="mapped_data.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                    
-                    # 2. Excel Download
-                    import io
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                        df_download.to_excel(writer, index=False, sheet_name='Sheet1')
-                    
-                    d_col2.download_button(
-                        label="Download as Excel",
-                        data=buffer.getvalue(),
-                        file_name="mapped_data.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+                    if schema:
+                        missing_required = []
+                        current_columns = df_final[available_cols].columns.tolist()
+                        
+                        for field, rules in schema.items():
+                            # Check if field is required and missing from our mapped columns
+                            if rules.get("required") and field not in current_columns:
+                                missing_required.append(field)
+                        
+                        if missing_required:
+                            st.error(f" **Validation Failed!** The following required columns are missing: {missing_required}")
+                            st.warning("Please map these columns above (using Standard or Custom Columns) to proceed.")
+                            validation_passed = False
+                        else:
+                            st.success("**Validation Passed:** All required output columns are present.")
+                            validation_passed = True
+                    else:
+                        st.warning(" Validation schema file (output_validation.json) not found. Skipping validation.")
+                        # If schema is missing, you can decide whether to allow run or not. 
+                        # Here I'm allowing it but with a warning.
+                        validation_passed = True 
+
                 else:
-                    st.warning("Pehle columns map karein taaki download enable ho sake.")
+                    st.warning("No columns mapped yet.")
+                    validation_passed = False
+                    
             except Exception as e:
-                st.error(f"Download error: {e}")
-            # 3. Execution
+                st.error(f"Could not preview or validate: {e}")
+                validation_passed = False
+
+            # --- DOWNLOAD BUTTONS ---
+            if available_cols:
+                df_download = df_final[available_cols]
+                d_col1, d_col2 = st.columns(2)
+                
+                # 1. CSV Download
+                csv = df_download.to_csv(index=False).encode('utf-8')
+                d_col1.download_button(
+                    label="Download as CSV",
+                    data=csv,
+                    file_name="mapped_data.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                # 2. Excel Download
+                import io
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                    df_download.to_excel(writer, index=False, sheet_name='Sheet1')
+                
+                d_col2.download_button(
+                    label="Download as Excel",
+                    data=buffer.getvalue(),
+                    file_name="mapped_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            # --- 3. Execution ---
             st.header("3. Execution")
             
-            if st.button("Save Configuration & Run Pipeline", type="primary"):
+            # Button is DISABLED if validation_passed is False
+            if st.button("Save Configuration & Run Pipeline", type="primary", disabled=not validation_passed):
+                
                 final_rename_map = rename_mapping.copy()
                 final_static_map = static_mapping.copy()
                 keep_columns = list(rename_mapping.values())
@@ -401,7 +431,7 @@ def main():
 
                     # Trigger Prefect
                     st.write("---")
-                    st.subheader("🚀 Triggering Orchestration")
+                    st.subheader(" Triggering Orchestration")
                     
                     cmd = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(__file__)), "orchestration", "flow.py"), mapping_filename]
                     with st.spinner("Running Prefect Flow..."):
@@ -410,17 +440,14 @@ def main():
                     if result.returncode == 0:
                         st.success("Pipeline executed successfully!")
                         import re
-                        # Prefect logs often go to stderr, and standard format is "View at http..."
-                        # Check both just in case
                         combined_output = (result.stdout or "") + "\n" + (result.stderr or "")
                         
                         dashboard_match = re.search(r"View at (https?://[^\s]+)", combined_output)
                         
                         if dashboard_match:
                             dashboard_url = dashboard_match.group(1)
-                            # Clean up trailing characters if any (like ANSI colors hidden or punctuation)
                             dashboard_url = dashboard_url.rstrip('.')
-                            st.link_button("👉 View Run in Prefect Cloud", url=dashboard_url, type="primary")
+                            st.link_button(" View Run in Prefect Cloud", url=dashboard_url, type="primary")
                         
                         with st.expander("Execution Logs"):
                             st.code(combined_output)
