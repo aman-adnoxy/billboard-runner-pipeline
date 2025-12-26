@@ -308,6 +308,51 @@ def main():
             except Exception as e:
                 st.error(f"Could not preview: {e}")
 
+# --- DOWNLOAD BUTTONS ---
+            st.write("---")
+            st.subheader(" Download Mapped Data")
+            
+            try:
+                # Same logic as preview to get the full mapped data
+                df_final = df.copy()
+                df_final = df_final.rename(columns=preview_rename)
+                for col, val in preview_static.items():
+                    df_final[col] = val
+                
+                # Sirf mapped columns hi select karna
+                final_cols = [c for c in list(set(preview_keep)) if c in df_final.columns]
+                if final_cols:
+                    df_download = df_final[final_cols]
+                    
+                    d_col1, d_col2 = st.columns(2)
+                    
+                    # 1. CSV Download
+                    csv = df_download.to_csv(index=False).encode('utf-8')
+                    d_col1.download_button(
+                        label="Download as CSV",
+                        data=csv,
+                        file_name="mapped_data.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    
+                    # 2. Excel Download
+                    import io
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                        df_download.to_excel(writer, index=False, sheet_name='Sheet1')
+                    
+                    d_col2.download_button(
+                        label="Download as Excel",
+                        data=buffer.getvalue(),
+                        file_name="mapped_data.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("Pehle columns map karein taaki download enable ho sake.")
+            except Exception as e:
+                st.error(f"Download error: {e}")
             # 3. Execution
             st.header("3. Execution")
             
