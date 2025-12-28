@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import re
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
 # --- HELPER FUNCTIONS ---
 
@@ -90,8 +92,36 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
     if 'locality' in df.columns and 'area' not in df.columns:
         df['area'] = df['locality'].astype(str).apply(lambda x: x.split(',')[0].strip() if ',' in x else x)
 
+    # Fill Location from Address if exists
     if 'address' in df.columns and 'location' not in df.columns:
         df['location'] = df['address']
+    
+    # --- REVERSE GEOCODING LOGIC ---
+    if 'location' not in df.columns:
+        df['location'] = np.nan
+        
+    mask_loc_missing = df['location'].isna() | (df['location'].astype(str).str.strip() == '')
+    mask_has_coords = df['latitude'].notna() & df['longitude'].notna()
+    
+    rows_to_geocode = mask_loc_missing & mask_has_coords
+    
+    if rows_to_geocode.any():
+        print(f"   Geocoding {rows_to_geocode.sum()} rows marked for missing location...")
+        geolocator = Nominatim(user_agent="billboard_pipeline_v1")
+        geocode = RateLimiter(geolocator.reverse, min_delay_seconds=1)
+        
+        def get_address(lat, lon):
+            try:
+                location = geocode(f"{lat}, {lon}")
+                return location.address if location else None
+            except Exception as e:
+                print(f"   Geo Error ({lat},{lon}): {e}")
+                return None
+
+        # Apply only on filtered rows
+        df.loc[rows_to_geocode, 'location'] = df.loc[rows_to_geocode].apply(
+            lambda row: get_address(row['latitude'], row['longitude']), axis=1
+        )
 
     return df
 
