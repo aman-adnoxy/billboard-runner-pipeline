@@ -125,5 +125,35 @@
             "neighborhood",
             "area_raw"
         ]
+    },
+    "frequency_per_minute": {
+        "label": "Frequency (per/min)",
+        "aliases": [
+            "frequency",
+            "freq",
+            "spots",
+            "fpm"
+        ]
+    },
+    "city": {
+        "label": "City",
+        "aliases": [
+            "city",
+            "town"
+        ]
+    },
+    "area": {
+        "label": "Area",
+        "aliases": [
+            "area",
+            "sub_locality"
+        ]
+    },
+    "district": {
+        "label": "District",
+        "aliases": [
+            "district",
+            "region"
+        ]
     }
 }

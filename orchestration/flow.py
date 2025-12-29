@@ -137,7 +137,7 @@ def save_output(df: pd.DataFrame, original_filename: str):
     )
     return output_filename
 
-@flow(name="Row-Level Strict Pipeline")
+@flow(name="Row-Level Strict Pipeline", log_prints=True)
 def mapping_pipeline(config_filename: str):
     df, config = load_and_init(config_filename)
     df = standardize_schema(df)
