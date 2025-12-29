@@ -2,6 +2,7 @@ import os
 import sys
 from supabase import create_client, Client, ClientOptions
 from src.config import load_environment
+from datetime import datetime
 
 # Ensure env is loaded when this module is imported if not already
 load_environment()
@@ -21,3 +22,20 @@ def get_supabase_client() -> Client:
     opts = ClientOptions(postgrest_client_timeout=600, storage_client_timeout=600)
     client: Client = create_client(SUPABASE_URL, SUPABASE_KEY, options=opts)
     return client
+
+def upsert_billboard_profiles(results: list):
+
+    for r in results:
+        profile = r["profile"]
+        billboard_id = r["billboard_id"]
+
+        collection.update_one(
+            {"_id": billboard_id},
+            {
+                "$set": {
+                    "profile": profile,
+                    "computed_at": datetime.utcnow(),
+                }
+            },
+            upsert=True
+        )

@@ -1,16 +1,15 @@
 {
-    "name": "streamlit-prefect-pipeline",
+    "name": "billboard-runner-pipeline",
     "version": "1.0.0",
     "description": "Bridge for Streamlit + Prefect using NPM Commands",
     "scripts": {
         "postinstall": "pip install -r requirements.txt",
-        "dev": "streamlit run ui/app.py"
+        "dev": "python -m streamlit run ui/app.py"
     },
     "keywords": [
         "streamlit",
         "prefect",
         "python"
     ],
-    "author": "Antigravity",
-    "license": "ISC"
+    "author": "Adnoxy"
 }
