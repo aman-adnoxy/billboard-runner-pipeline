@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 import altair as alt
 from dotenv import load_dotenv
+import time
 
 # --- Import from SRC ---
 # Add parent directory to path to allow importing src
@@ -38,17 +39,59 @@ def save_uploaded_file_to_supabase(uploaded_file):
     file_id = str(uuid.uuid4())[:8]
     file_name = f"{file_id}_{uploaded_file.name}"
     
-    try:
-        file_bytes = uploaded_file.getvalue()
-        res = supabase.storage.from_(BUCKET_INPUT).upload(
-            path=file_name,
-            file=file_bytes,
-            file_options={"content-type": uploaded_file.type}
-        )
-        return file_name
-    except Exception as e:
-        st.error(f"Supabase Upload Error: {e}")
-        return None
+#     try:
+#         file_bytes = uploaded_file.getvalue()
+#         res = supabase.storage.from_(BUCKET_INPUT).upload(
+#             path=file_name,
+#             file=file_bytes,
+#             file_options={"content-type": uploaded_file.type}
+#         )
+#         return file_name
+#     except Exception as e:
+#         st.error(f"Supabase Upload Error: {e}")
+#         return None
+
+def save_uploaded_file_to_supabase(uploaded_file):
+    # 1. single source of identity: epoch milliseconds
+    upload_uid = int(time.time() * 1000)
+
+    # 2. derive filenames
+    original_filename = uploaded_file.name
+    file_ext = original_filename.split('.')[-1].lower()
+    stored_filename = f"{upload_uid}_{original_filename}"
+
+    # 3. read bytes
+    file_bytes = uploaded_file.getvalue()
+
+    # 4. upload to Supabase Storage
+    supabase.storage.from_(BUCKET_INPUT).upload(
+        path=stored_filename,
+        file=file_bytes,
+        file_options={"content-type": uploaded_file.type}
+    )
+
+    # 5. public URL
+    public_url = supabase.storage.from_(BUCKET_INPUT).get_public_url(
+        stored_filename
+    )
+
+    # 6. persist ingestion metadata (atomic truth)
+    supabase.table("uploaded_files").insert({
+        "upload_timestamp": upload_uid,
+        "original_filename": original_filename,
+        "stored_filename": stored_filename,
+        "file_format": file_ext,
+        "uploaded_at": time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+        "storage_bucket": BUCKET_INPUT,
+        "storage_path": stored_filename,
+        "public_url": public_url,
+        "status": "uploaded"
+    }).execute()
+
+    return stored_filename
+
+
+
 
 def main():
     st.set_page_config(page_title="Data Import Pipeline", layout="wide")
