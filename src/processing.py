@@ -36,14 +36,20 @@ def extract_dim_str(s, marker):
 
 def standard_cleanup(df: pd.DataFrame) -> pd.DataFrame:
     """Standardizes IDs and basic string cleanups."""
+    initial_rows = len(df)
+    
     if 'id' in df.columns: df = df.drop(columns=['id'])
     
     if 'billboard_id' not in df.columns:
+        print(f"INFO >>> Step 1 | input_rows: {initial_rows} | output_rows: 0")
         return df.iloc[0:0]
 
     df = df.dropna(subset=['billboard_id'])
     df['billboard_id'] = df['billboard_id'].astype(str).str.strip()
     df = df.drop_duplicates(subset=['billboard_id'])
+    
+    final_rows = len(df)
+    print(f"INFO >>> Step 1 | input_rows: {initial_rows} | output_rows: {final_rows}")
 
     # Format Mapping
     format_map = {
@@ -67,6 +73,8 @@ def standard_cleanup(df: pd.DataFrame) -> pd.DataFrame:
 
 def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
     """Parses Coordinates and fills location hierarchy."""
+    total_rows = len(df)
+    
     # Initialize columns if missing
     if 'latitude' not in df.columns: df['latitude'] = np.nan
     if 'longitude' not in df.columns: df['longitude'] = np.nan
@@ -105,8 +113,12 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
     
     rows_to_geocode = mask_loc_missing & mask_has_coords
     
+    empty_loc_count = rows_to_geocode.sum()
+    success_count = 0
+    failed_count = 0
+
     if rows_to_geocode.any():
-        print(f"   Geocoding {rows_to_geocode.sum()} rows marked for missing location...")
+        print(f"   Geocoding {empty_loc_count} rows marked for missing location...")
         geolocator = Nominatim(user_agent="billboard_pipeline_v1")
         geocode = RateLimiter(geolocator.reverse, min_delay_seconds=1)
         
@@ -118,15 +130,34 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
                 print(f"   Geo Error ({lat},{lon}): {e}")
                 return None
 
-        # Apply only on filtered rows
-        df.loc[rows_to_geocode, 'location'] = df.loc[rows_to_geocode].apply(
-            lambda row: get_address(row['latitude'], row['longitude']), axis=1
-        )
+        # Apply and track success
+        indices = df[rows_to_geocode].index
+        total_geo = len(indices)
+        processed_count = 0
+        
+        print(f"INFO >>> Step 2 Progress | processed: 0 | remaining: {total_geo}")
+        
+        for idx in indices:
+            row = df.loc[idx]
+            res = get_address(row['latitude'], row['longitude'])
+            df.at[idx, 'location'] = res
+            
+            processed_count += 1
+            if processed_count % 10 == 0 or processed_count == total_geo:
+                print(f"INFO >>> Step 2 Progress | processed: {processed_count} | remaining: {total_geo - processed_count}")
+        
+        # Recalculate counts based on what we just filled
+        # We need to check only the rows we just touched to be accurate to the logic
+        newly_filled = df.loc[indices, 'location']
+        success_count = newly_filled.notna().sum()
+        failed_count = total_geo - success_count
 
+    print(f"INFO >>> Step 2 | total_rows: {total_rows} | empty_location: {empty_loc_count} | geocode_success: {success_count} | geocode_failed: {failed_count}")
     return df
 
 def fill_dimensions(df: pd.DataFrame) -> pd.DataFrame:
     """Handles Width, Height, and Format Type defaults."""
+    input_rows = len(df)
     
     # Ensure columns exist and are numeric
     if 'width_ft' not in df.columns: df['width_ft'] = np.nan
@@ -169,10 +200,14 @@ def fill_dimensions(df: pd.DataFrame) -> pd.DataFrame:
     if 'quantity' not in df.columns: df['quantity'] = np.nan
     df['quantity'] = df['quantity'].fillna(1).apply(lambda x: 1 if x == 0 else x)
 
+    # We are not removing distinct rows here, so removed=0
+    print(f"INFO >>> Step 3 | input_rows: {input_rows} | rows_removed: 0 | output_rows: {input_rows}")
     return df
 
 def calculate_financials(df: pd.DataFrame) -> pd.DataFrame:
     """Calcs Base Rate and Card Rate."""
+    input_rows = len(df)
+
     price_cols = ['minimal_price', 'base_rate_per_month', 'card_rate_per_month']
     for col in price_cols:
         if col in df.columns: df[col] = df[col].apply(clean_numeric)
@@ -194,4 +229,6 @@ def calculate_financials(df: pd.DataFrame) -> pd.DataFrame:
     df['base_rate_per_unit'] = df['base_rate_per_month']
     df['card_rate_per_unit'] = df['card_rate_per_month']
 
+    # Assuming 'nourished' means we added value to them
+    print(f"INFO >>> Step 4 | enriched_rows: {input_rows} | output_rows: {input_rows}")
     return df

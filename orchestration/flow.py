@@ -82,6 +82,8 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     """
     print(">>> Step 5: Final Row-Level Validation...")
     start_count = len(df)
+    dropped_images = 0
+    dropped_coords = 0
 
     # 1. IMAGE CHECK (Row by Row)
     img_col = 'image_urls' if 'image_urls' in df.columns else 'image_url'
@@ -90,7 +92,8 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
         df = df.dropna(subset=[img_col])
         mask_invalid_img = df[img_col].astype(str).str.strip().str.lower().isin(['', 'nan', 'null', 'none', '[]'])
         df = df[~mask_invalid_img]
-        print(f"   Removed {start_count - len(df)} rows due to missing images.")
+        dropped_images = start_count - len(df)
+        print(f"   Removed {dropped_images} rows due to missing images.")
     else:
         print("   WARNING: Image column missing entirely. All rows dropped.")
         return df.iloc[0:0]
@@ -102,7 +105,8 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
         df = df.dropna(subset=['latitude', 'longitude'])
         mask_zero = (df['latitude'] == 0) & (df['longitude'] == 0)
         df = df[~mask_zero]
-        print(f"   Removed {current_count - len(df)} rows due to missing coordinates.")
+        dropped_coords = current_count - len(df)
+        print(f"   Removed {dropped_coords} rows due to missing coordinates.")
     else:
         print("   WARNING: Coordinate columns missing entirely. All rows dropped.")
         return df.iloc[0:0]
@@ -118,7 +122,16 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     final_cols = list(set(keep_cols + core_cols))
     existing_cols = [c for c in final_cols if c in df.columns]
     
-    print(f"   Final Valid Row Count: {len(df)}")
+    validated_rows = len(df)
+    
+    # Determine Status based on rows dropped
+    status_str = "SUCCESS"
+    if validated_rows < start_count:
+        status_str = "SUCCESS_WITH_DROPS"
+        
+    print(f"   Final Valid Row Count: {validated_rows}")
+    print(f"INFO >>> Step 5 | validated_rows: {validated_rows} | dropped_images: {dropped_images} | dropped_coords: {dropped_coords} | status: {status_str}")
+    
     return df[existing_cols]
 
 @task

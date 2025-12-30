@@ -90,8 +90,14 @@ def save_uploaded_file_to_supabase(uploaded_file):
 
     return stored_filename
 
-
-
+# --- NEW: Import LogParser ---
+try:
+    from ui.log_utils import LogParser
+except ImportError:
+    # Fallback if running directly from ui folder
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from log_utils import LogParser
 
 def main():
     st.set_page_config(page_title="Data Import Pipeline", layout="wide")
@@ -554,6 +560,40 @@ def main():
                     
                     # Capture variable
                     final_output_filename = None
+                    step_placeholder = None
+
+                    # Helper to render logs
+                    def render_logs(raw_lines, limit=50):
+                        parsed = LogParser.parse_logs(raw_lines)
+                        # Show last N entries if limit is set
+                        if limit:
+                            recent = parsed[-limit:]
+                        else:
+                            recent = parsed
+                        
+                        html_content = "<div style='font-family:monospace; font-size:12px; line-height:1.4;'>"
+                        for entry in recent:
+                            color = LogParser.get_color_for_level(entry['level'])
+                            ts = entry['timestamp']
+                            lvl = entry['level']
+                            msg = entry['message']
+                            details = entry['details']
+                            
+                            # Escape HTML sensitive chars
+                            msg = msg.replace("<", "&lt;").replace(">", "&gt;")
+                            
+                            html_content += f"<div style='border-bottom: 1px solid #333; padding: 2px 0;'>"
+                            html_content += f"<span style='color:#666; margin-right:8px;'>{ts}</span>"
+                            html_content += f"<span style='color:{color}; font-weight:bold; margin-right:8px; min-width:60px; display:inline-block;'>{lvl}</span>"
+                            html_content += f"<span style='color:#ddd;'>{msg}</span>"
+                            
+                            if details:
+                                safe_details = details.replace("<", "&lt;").replace(">", "&gt;")
+                                html_content += f"<div style='background:#1e1e1e; color:#e74c3c; padding:4px; margin-top:2px; white-space:pre-wrap;'>{safe_details}</div>"
+                            
+                            html_content += "</div>"
+                        html_content += "</div>"
+                        return html_content
                     
                     # Use Popen for real-time output reading
                     try:
@@ -589,9 +629,13 @@ def main():
                                 
                             if line:
                                 clean_line = line.strip()
-                                full_logs.append(clean_line)
-                                # Show last 20 lines to keep UI snappy
-                                log_placeholder.code("\n".join(full_logs[-20:]))
+                                
+                                # Only append to visual logs if it's NOT a high-frequency progress update
+                                if "Step 2 Progress" not in clean_line:
+                                    full_logs.append(clean_line)
+                                    
+                                # Render structured logs
+                                log_placeholder.markdown(render_logs(full_logs), unsafe_allow_html=True)
                                 
                                 # --- PARSING LOGIC ---
                                 now = datetime.now()
@@ -637,72 +681,125 @@ def main():
                                         dashboard_button_placeholder.link_button("👉 Monitor Real-Time in Prefect Cloud", url=url, type="primary")
                                         dashboard_url_found = True
 
-                                # 3. Check for Steps (Gantt Chart Logic)
+                                # 3. Check for Steps & Metrics
                                 if ">>> Step" in clean_line:
-                                    # Example: ">>> Step 1: Standardizing Schema..."
-                                    parts = clean_line.split(":")
-                                    if len(parts) > 1:
-                                        step_prefix = parts[0].replace(">>> ", "").strip()
-                                        step_desc = parts[1].strip()
+                                    try:
+                                        content_part = clean_line.split(">>> ", 1)[1]
                                         
-                                        # Close previous task
+                                        # --- CASE A: METRICS or PROGRESS (Updates existing step) ---
+                                        if "|" in content_part:
+                                            # Ensure we have a placeholder to update
+                                            if step_placeholder is None:
+                                                step_placeholder = status_container.empty()
+                                                
+                                            if "Progress" in content_part:
+                                                # PROGRESS UPDATE
+                                                metric_parts = content_part.split("|")
+                                                prog_dict = {}
+                                                for part in metric_parts[1:]:
+                                                    if ":" in part:
+                                                        k, v = part.split(":", 1)
+                                                        prog_dict[k.strip()] = v.strip()
+                                                
+                                                processed = prog_dict.get('processed', '0')
+                                                remaining = prog_dict.get('remaining', '?')
+                                                
+                                                # Clean, Single-Line Live Status
+                                                step_placeholder.info(f"⏳ **Geocoding in Progress** — Processed: `{processed}` | Remaining: `{remaining}`")
+                                                
+                                            else:
+                                                # FINAL SUMMARY TABLE
+                                                metric_parts = content_part.split("|")
+                                                step_name = metric_parts[0].strip()
+                                                
+                                                # Build a clean Markdown Table
+                                                metrics_md = f"**{step_name} Stats**\n\n"
+                                                metrics_md += "| Metric | Value |\n|---|---|\n"
+                                                
+                                                for part in metric_parts[1:]:
+                                                    if ":" in part:
+                                                        k, v = part.split(":", 1)
+                                                        k = k.strip().replace("_", " ").title()
+                                                        v = v.strip()
+                                                        metrics_md += f"| {k} | `{v}` |\n"
+                                                
+                                                # Overwrite the placeholder with the final table
+                                                step_placeholder.markdown(metrics_md)
+                                            
+                                        # --- CASE B: NEW STEP START ---
+                                        else:
+                                            # Standard Step Start text
+                                            step_info = content_part.strip()
+                                            
+                                            if ":" in step_info:
+                                                step_prefix, step_desc = step_info.split(":", 1)
+                                                step_prefix = step_prefix.strip()
+                                                step_desc = step_desc.strip()
+                                            else:
+                                                step_prefix = step_info
+                                                step_desc = ""
+
+                                            # Close previous task logic (Gantt)
+                                            if current_task:
+                                                current_task['End'] = now
+                                                current_task['Status'] = 'Completed'
+                                            
+                                            # Start new task logic
+                                            new_task = {
+                                                "Task": f"{step_prefix}: {step_desc}",
+                                                "Start": now,
+                                                "End": now,
+                                                "Status": "Running"
+                                            }
+                                            task_events.append(new_task)
+                                            current_task = new_task
+                                            
+                                            # 1. Append Header to Container
+                                            status_container.markdown(f"### ✅ {step_prefix}: {step_desc}")
+                                            
+                                            # 2. Create NEW Placeholder for this step's future metrics
+                                            step_placeholder = status_container.empty()
+                                            
+                                            # Update Progress Bar
+                                            prog_val = 0
+                                            for k, v in steps_map.items():
+                                                if k in step_prefix:
+                                                    prog_val = v
+                                                    break
+                                            if prog_val > 0:
+                                                progress_bar.progress(prog_val, text=f"Running: {step_desc}")
+
+                                    except Exception as e:
+                                        pass
+
+                                # Capture Output Filename
+                                if "Saving Output" in clean_line:
+                                    try:
+                                        # Reset current task if needed
                                         if current_task:
                                             current_task['End'] = now
                                             current_task['Status'] = 'Completed'
-                                        
-                                        # Start new task
+                                            
+                                        # Start saving task
                                         new_task = {
-                                            "Task": f"{step_prefix}: {step_desc}",
+                                            "Task": "Saving Output",
                                             "Start": now,
-                                            "End": now, # Will update dynamically
+                                            "End": now,
                                             "Status": "Running"
                                         }
                                         task_events.append(new_task)
                                         current_task = new_task
                                         
-                                        # Write to status box
-                                        status_container.write(f"✅ Executing: **{step_prefix}** - {step_desc}")
+                                        status_container.markdown("### 💾 Saving Result to Supabase...")
+                                        progress_bar.progress(95, text="Finalizing...")
                                         
-                                        # Update Progress logic
-                                        prog_val = 0
-                                        for k, v in steps_map.items():
-                                            if k in step_prefix:
-                                                prog_val = v
-                                                break
-                                        
-                                        if prog_val > 0:
-                                            progress_bar.progress(prog_val, text=f"Running: {step_desc}")
-                                            
-                                    # Capture Output Filename (Regex for safety)
-                                    if "Saving Output" in clean_line:
-                                        try:
-                                            # Regex to find: match "Saving Output: " followed by filename until "..." or end
-                                            import re
-                                            # Look for "Saving Output: <filename>..." or just <filename>
-                                            match_fname = re.search(r"Saving Output:\s*(.*?)(?:\.\.\.|$)", clean_line)
-                                            if match_fname:
-                                                final_output_filename = match_fname.group(1).strip()
-                                                # Debug: verify capture (can remove later)
-                                                # log_placeholder.write(f"DEBUG: Captured filename: {final_output_filename}") 
-                                        except Exception as rx:
-                                            pass
-
-                                    if current_task:
-                                        current_task['End'] = now
-                                        current_task['Status'] = 'Completed'
-                                        
-                                    # Start saving task
-                                    new_task = {
-                                        "Task": "Saving Output",
-                                        "Start": now,
-                                        "End": now,
-                                        "Status": "Running"
-                                    }
-                                    task_events.append(new_task)
-                                    current_task = new_task
-                                    
-                                    status_container.write("💾 Saving Result to Supabase...")
-                                    progress_bar.progress(95, text="Finalizing...")
+                                        # Regex to find filename if needed
+                                        import re
+                                        match_fname = re.search(r"Saving Output:\s*(.*?)(?:\.\.\.|$)", clean_line)
+                                        if match_fname:
+                                            final_output_filename = match_fname.group(1).strip()
+                                    except Exception as rx:
+                                        pass
 
                                 # --- UPDATE GANTT CHART ---
                                 if task_events:
@@ -748,7 +845,7 @@ def main():
                             timeline_container.altair_chart(chart, theme="streamlit")
 
                         # Final log dump (full)
-                        log_placeholder.code("\n".join(full_logs))
+                        log_placeholder.markdown(render_logs(full_logs, limit=None), unsafe_allow_html=True)
 
                         if return_code == 0:
                             progress_bar.progress(100, text="Pipeline Completed Successfully!")
