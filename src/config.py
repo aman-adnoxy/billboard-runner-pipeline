@@ -15,6 +15,9 @@ def load_environment():
     else:
         print(f"Warning: .env file not found at {ENV_PATH}")
 
+# Explicitly load on import so constants below are populated
+load_environment()
+
 # Load Schema
 def load_required_fields():
     """Load the standardized fields definition from JSON."""
@@ -34,3 +37,4 @@ BUCKET_OUTPUT = "output"
 
 # Exported Constants
 REQUIRED_FIELDS = load_required_fields()
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")

@@ -88,10 +88,13 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     # 1. IMAGE CHECK (Row by Row)
     img_col = 'image_urls' if 'image_urls' in df.columns else 'image_url'
     
+    print(f"DEBUG: Checking for image column: '{img_col}' in {df.columns.tolist()}")
     if img_col in df.columns:
+        print(f"DEBUG: Rows before image drop: {len(df)}")
         df = df.dropna(subset=[img_col])
         mask_invalid_img = df[img_col].astype(str).str.strip().str.lower().isin(['', 'nan', 'null', 'none', '[]'])
         df = df[~mask_invalid_img]
+        print(f"DEBUG: Rows after image drop: {len(df)}")
         dropped_images = start_count - len(df)
         print(f"   Removed {dropped_images} rows due to missing images.")
     else:
@@ -101,10 +104,18 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     current_count = len(df)
 
     # 2. COORDINATE CHECK (Row by Row)
+    # Note: 'latitude' and 'longitude' should have been populated by extract_geo_features_task
+    # if valid coordinates were found in 'coordinates' column.
+    
+    print(f"DEBUG: Checking for coordinate columns in {df.columns.tolist()}")
     if 'latitude' in df.columns and 'longitude' in df.columns:
+        print(f"DEBUG: Rows before coord drop: {len(df)}")
+        # Check for NaN first
         df = df.dropna(subset=['latitude', 'longitude'])
+        # Check for 0,0
         mask_zero = (df['latitude'] == 0) & (df['longitude'] == 0)
         df = df[~mask_zero]
+        print(f"DEBUG: Rows after coord drop: {len(df)}")
         dropped_coords = current_count - len(df)
         print(f"   Removed {dropped_coords} rows due to missing coordinates.")
     else:
@@ -119,7 +130,16 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
         'card_rate_per_month', 'city', 'area', 'district', 'location', 
         'format_type', 'lighting_type', img_col
     ]
-    final_cols = list(set(keep_cols + core_cols))
+    
+    # Clean up single columns if we successfully split them
+    cols_to_exclude = set()
+    if 'width_ft' in df.columns and 'height_ft' in df.columns:
+        cols_to_exclude.add('dimensions')
+    if 'latitude' in df.columns and 'longitude' in df.columns:
+        cols_to_exclude.add('coordinates')
+
+    final_cols = list(set(keep_cols + core_cols) - cols_to_exclude)
+    
     existing_cols = [c for c in final_cols if c in df.columns]
     
     validated_rows = len(df)
