@@ -6,3 +6,5 @@ python-dotenv
 supabase
 xlsxwriter
 geopy
+requests
+openpyxl
