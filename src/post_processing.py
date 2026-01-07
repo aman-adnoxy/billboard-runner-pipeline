@@ -81,6 +81,8 @@ def map_lighting_type(lighting):
         return "BL"
     if "front" in lighting or lighting == "fl":
         return "FL"
+    if "ambient" in lighting or "ambilit" in lighting:
+        return "Ambilit"
     return "NL"
 
 # ---------------------------
@@ -179,9 +181,13 @@ def transform_dataframe(df):
         'latitude': 'lat',
         'longitude': 'lon',
         'lng': 'lon',
-        'base_rate_per_month': 'base_rate_per_unit',
-        'card_rate_per_month': 'card_rate_per_unit'
     }
+    # Only rename if target doesn't exist to avoid duplicates
+    if 'base_rate_per_unit' not in df.columns:
+        col_map['base_rate_per_month'] = 'base_rate_per_unit'
+    if 'card_rate_per_unit' not in df.columns:
+        col_map['card_rate_per_month'] = 'card_rate_per_unit'
+
     df = df.rename(columns=col_map)
 
     # ---------------------------------------------------------
@@ -237,7 +243,7 @@ def transform_dataframe(df):
 
     # Clean format_type column to ensure consistent matching
     if 'format_type' in df.columns:
-        df['format_type'] = df['format_type'].astype(str).replace('nan', '').apply(lambda x: re.sub(r'\s+', ' ', x).strip())
+        df['format_type'] = df['format_type'].astype(str).replace('nan', '').apply(lambda x: re.sub(r'\s+', ' ', x).strip().replace(' ', '_'))
 
     # Ensure lat/lon are clean floats
     if 'lat' not in df.columns or 'lon' not in df.columns:
@@ -282,8 +288,8 @@ def transform_dataframe(df):
             "quantity": row.get("quantity", 1),
             "title": title,
             "description": description,
-            "latitude": lat,
-            "longitude": lng,
+            "lat": lat,
+            "lon": lng,
             "google_location": formatted_address,
             "address": row.get("location", ""),
             "city": city or row.get("city", ""),
