@@ -108,12 +108,12 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     # if valid coordinates were found in 'coordinates' column.
     
     print(f"DEBUG: Checking for coordinate columns in {df.columns.tolist()}")
-    if 'latitude' in df.columns and 'longitude' in df.columns:
+    if 'lat' in df.columns and 'lon' in df.columns:
         print(f"DEBUG: Rows before coord drop: {len(df)}")
         # Check for NaN first
-        df = df.dropna(subset=['latitude', 'longitude'])
+        df = df.dropna(subset=['lat', 'lon'])
         # Check for 0,0
-        mask_zero = (df['latitude'] == 0) & (df['longitude'] == 0)
+        mask_zero = (df['lat'] == 0) & (df['lon'] == 0)
         df = df[~mask_zero]
         print(f"DEBUG: Rows after coord drop: {len(df)}")
         dropped_coords = current_count - len(df)
@@ -125,9 +125,10 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     # 3. SELECT FINAL COLUMNS
     keep_cols = config.get("keep_columns", [])
     core_cols = [
-        'billboard_id', 'latitude', 'longitude', 'width_ft', 'height_ft',
+        'billboard_id', 'lat', 'lon', 'width_ft', 'height_ft',
         'frequency_per_minute', 'quantity', 'base_rate_per_month', 
-        'card_rate_per_month', 'city', 'area', 'district', 'location', 
+        'card_rate_per_month', 'base_rate_per_unit', 'card_rate_per_unit', 
+        'city', 'area', 'district', 'location', 
         'format_type', 'lighting_type', img_col
     ]
     
@@ -135,7 +136,7 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
     cols_to_exclude = set()
     if 'width_ft' in df.columns and 'height_ft' in df.columns:
         cols_to_exclude.add('dimensions')
-    if 'latitude' in df.columns and 'longitude' in df.columns:
+    if 'lat' in df.columns and 'lon' in df.columns:
         cols_to_exclude.add('coordinates')
 
     final_cols = list(set(keep_cols + core_cols) - cols_to_exclude)

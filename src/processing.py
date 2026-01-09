@@ -59,11 +59,14 @@ def standard_cleanup(df: pd.DataFrame) -> pd.DataFrame:
     }
     if 'format_type' in df.columns:
         df['format_type'] = df['format_type'].map(lambda x: format_map.get(x, x))
+        # Ensure underscores instead of spaces
+        df['format_type'] = df['format_type'].astype(str).str.replace(' ', '_')
 
     # Lighting Mapping
     lighting_map = {
         "NON LIT": "Unlit", "UNLIT": "Unlit", "BACK LIT": "Backlit", 
-        "FRONT LIT": "Frontlit", "LED": "Digital", "DIGITAL": "Digital"
+        "FRONT LIT": "Frontlit", "LED": "Digital", "DIGITAL": "Digital",
+        "AMBIENT LIT": "Ambilit", "AMBIENT": "Ambilit", "AMBILIT": "Ambilit"
     }
     if 'lighting_type' in df.columns:
         df['lighting_type'] = df['lighting_type'].astype(str).str.upper().str.strip()
@@ -153,6 +156,9 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
         failed_count = total_geo - success_count
 
     print(f"INFO >>> Step 2 | total_rows: {total_rows} | empty_location: {empty_loc_count} | geocode_success: {success_count} | geocode_failed: {failed_count}")
+    
+    # Rename to standardized lat/lon
+    df = df.rename(columns={'latitude': 'lat', 'longitude': 'lon'})
     return df
 
 def fill_dimensions(df: pd.DataFrame) -> pd.DataFrame:
@@ -219,7 +225,7 @@ def calculate_financials(df: pd.DataFrame) -> pd.DataFrame:
         median_price = df['minimal_price'].median()
         if pd.isna(median_price) or median_price == 0: median_price = 15000.0
         prices = df.loc[mask_needs_calc, 'minimal_price'].fillna(median_price)
-        df.loc[mask_needs_calc, 'base_rate_per_month'] = prices * 4.285
+        df.loc[mask_needs_calc, 'base_rate_per_month'] = prices
 
     if 'card_rate_per_month' not in df.columns: df['card_rate_per_month'] = np.nan
     mask_card_calc = df['card_rate_per_month'].isna()
