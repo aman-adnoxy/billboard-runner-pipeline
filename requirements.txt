@@ -8,3 +8,4 @@ xlsxwriter
 geopy
 requests
 openpyxl
+pymongo

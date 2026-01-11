@@ -461,7 +461,7 @@ def main():
                     data=csv,
                     file_name="mapped_data.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width="content"
                 )
                 
                 # 2. Excel Download
@@ -475,7 +475,7 @@ def main():
                     data=buffer.getvalue(),
                     file_name="mapped_data.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                    width="content"
                 )
 
             # --- 3. Execution ---
