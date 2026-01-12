@@ -79,20 +79,25 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
     total_rows = len(df)
     
     # Initialize columns if missing
-    if 'latitude' not in df.columns: df['latitude'] = np.nan
-    if 'longitude' not in df.columns: df['longitude'] = np.nan
+    # Normalize legacy columns
+    if 'latitude' in df.columns: df = df.rename(columns={'latitude': 'lat'})
+    if 'longitude' in df.columns: df = df.rename(columns={'longitude': 'lon'})
+
+    # Initialize columns if missing
+    if 'lat' not in df.columns: df['lat'] = np.nan
+    if 'lon' not in df.columns: df['lon'] = np.nan
 
     # Smart Parse
     if 'coordinates' in df.columns:
-        mask_missing = df['latitude'].isna() | df['longitude'].isna()
+        mask_missing = df['lat'].isna() | df['lon'].isna()
         if mask_missing.any():
             parsed = df.loc[mask_missing, 'coordinates'].apply(parse_coord_string)
-            df.loc[mask_missing, 'latitude'] = parsed.apply(lambda x: x[0] if x else None)
-            df.loc[mask_missing, 'longitude'] = parsed.apply(lambda x: x[1] if x else None)
+            df.loc[mask_missing, 'lat'] = parsed.apply(lambda x: x[0] if x else None)
+            df.loc[mask_missing, 'lon'] = parsed.apply(lambda x: x[1] if x else None)
 
     # Force Numeric
-    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+    df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+    df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
 
     # Hierarchy
     if 'city' in df.columns:
@@ -112,7 +117,7 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
         df['location'] = np.nan
         
     mask_loc_missing = df['location'].isna() | (df['location'].astype(str).str.strip() == '')
-    mask_has_coords = df['latitude'].notna() & df['longitude'].notna()
+    mask_has_coords = df['lat'].notna() & df['lon'].notna()
     
     rows_to_geocode = mask_loc_missing & mask_has_coords
     
@@ -142,7 +147,7 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
         
         for idx in indices:
             row = df.loc[idx]
-            res = get_address(row['latitude'], row['longitude'])
+            res = get_address(row['lat'], row['lon'])
             df.at[idx, 'location'] = res
             
             processed_count += 1
@@ -157,8 +162,7 @@ def extract_geography(df: pd.DataFrame) -> pd.DataFrame:
 
     print(f"INFO >>> Step 2 | total_rows: {total_rows} | empty_location: {empty_loc_count} | geocode_success: {success_count} | geocode_failed: {failed_count}")
     
-    # Rename to standardized lat/lon
-    df = df.rename(columns={'latitude': 'lat', 'longitude': 'lon'})
+    # Rename step removed (already lat/lon)
     return df
 
 def fill_dimensions(df: pd.DataFrame) -> pd.DataFrame:

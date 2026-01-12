@@ -90,8 +90,8 @@ except ImportError:
         from log_utils import LogParser
 
 def main():
-    st.set_page_config(page_title="Data Transformation", layout="wide")
-    st.title("Step 1: Data Transformation")
+    st.set_page_config(page_title="Data Transformation Step 1--> step 2", layout="wide")
+    st.title("Step 1 --> Step 2: Data Transformation")
 
     with st.expander("System Status", expanded=True):
         st.write(f" Storage: Supabase")
@@ -164,7 +164,7 @@ def main():
 
             # Layout tracking
             layout_idx = 0
-            coord_keys = ['latitude', 'longitude', 'coordinates']
+            coord_keys = ['lat', 'lon', 'coordinates']
             dim_keys = ['width_ft', 'height_ft', 'dimensions']
             
             location_block_rendered = False
@@ -206,8 +206,8 @@ def main():
                                 sub_c1, sub_c2 = st.columns(2)
                                 with sub_c1:
                                     # Latitude
-                                    l_conf = REQUIRED_FIELDS.get('latitude', {})
-                                    l_idx = get_default_index('latitude', l_conf, col_options_base)
+                                    l_conf = REQUIRED_FIELDS.get('lat', {})
+                                    l_idx = get_default_index('lat', l_conf, col_options_base)
                                     sel_lat = st.selectbox(
                                         f"{l_conf.get('label', 'Latitude')}", 
                                         col_options_base, 
@@ -215,11 +215,11 @@ def main():
                                         key="std_latitude"
                                     )
                                     if sel_lat != "(Select Column)":
-                                        rename_mapping[sel_lat] = "latitude"
+                                        rename_mapping[sel_lat] = "lat"
                                 with sub_c2:
                                     # Longitude
-                                    g_conf = REQUIRED_FIELDS.get('longitude', {})
-                                    g_idx = get_default_index('longitude', g_conf, col_options_base)
+                                    g_conf = REQUIRED_FIELDS.get('lon', {})
+                                    g_idx = get_default_index('lon', g_conf, col_options_base)
                                     sel_long = st.selectbox(
                                         f"{g_conf.get('label', 'Longitude')}", 
                                         col_options_base, 
@@ -227,7 +227,7 @@ def main():
                                         key="std_longitude"
                                     )
                                     if sel_long != "(Select Column)":
-                                        rename_mapping[sel_long] = "longitude"
+                                        rename_mapping[sel_long] = "lon"
                     
                     location_block_rendered = True
                     layout_idx += 1
@@ -380,6 +380,18 @@ def main():
                 for col, val in preview_static.items():
                     df_final[col] = val
 
+                # --- Reorder Columns (User Request) ---
+                desired_order = [
+                    "billboard_id", "location", "area", "locality", "city", "district", 
+                    "format_type", "lighting_type", "width_ft", "height_ft", 
+                    "base_rate_per_month", "base_rate_per_unit", "card_rate_per_unit", "card_rate_per_month", 
+                    "minimal_price", "lat", "lon", "quantity", "frequency_per_minute", "image_urls"
+                ]
+                
+                ordered_cols = [c for c in desired_order if c in df_final.columns]
+                remaining_cols = [c for c in df_final.columns if c not in ordered_cols]
+                df_final = df_final[ordered_cols + remaining_cols]
+
                 # Custom Columns Numeric Cleaning (width_ft, height_ft)
                 # If these came from custom columns (static or mapped), ensure they are numeric
                 numeric_fields = ['width_ft', 'height_ft', 'base_rate_per_month', 'base_rate_per_unit', 'card_rate_per_month', 'card_rate_per_unit']
@@ -413,7 +425,7 @@ def main():
                                         continue
                                 
                                 # 2. Coordinates Check
-                                if field in ['latitude', 'longitude']:
+                                if field in ['lat', 'lon']:
                                     # If 'coordinates' exists, we consider lat/long satisfied
                                     if 'coordinates' in current_columns:
                                         continue

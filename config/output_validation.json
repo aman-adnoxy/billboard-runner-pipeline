@@ -7,11 +7,11 @@
         "required": true,
         "type": "string"
     },
-    "latitude": {
+    "lat": {
         "required": true,
         "type": "float"
     },
-    "longitude": {
+    "lon": {
         "required": true,
         "type": "float"
     },

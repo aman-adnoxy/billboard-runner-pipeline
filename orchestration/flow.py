@@ -141,7 +141,18 @@ def validate_and_clean(df: pd.DataFrame, config: dict):
 
     final_cols = list(set(keep_cols + core_cols) - cols_to_exclude)
     
-    existing_cols = [c for c in final_cols if c in df.columns]
+    # Sort to user preference
+    desired_order = [
+         "billboard_id", "location", "area", "locality", "city", "district", 
+         "format_type", "lighting_type", "width_ft", "height_ft", 
+         "base_rate_per_month", "base_rate_per_unit", "card_rate_per_unit", "card_rate_per_month", 
+         "minimal_price", "lat", "lon", "quantity", "frequency_per_minute", "image_urls", "image_url"
+     ]
+    ordered_list = [c for c in desired_order if c in final_cols]
+    others_list = [c for c in final_cols if c not in ordered_list]
+    final_cols_sorted = ordered_list + others_list
+    
+    existing_cols = [c for c in final_cols_sorted if c in df.columns]
     
     validated_rows = len(df)
     

@@ -11,14 +11,14 @@
             "serial_no"
         ]
     },
-    "latitude": {
+    "lat": {
         "label": "Latitude",
         "aliases": [
             "lat",
             "latitude"
         ]
     },
-    "longitude": {
+    "lon": {
         "label": "Longitude",
         "aliases": [
             "long",
