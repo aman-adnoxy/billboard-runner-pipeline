@@ -7,9 +7,13 @@
     "Pole_Kiosk": "70b86c94-bc71-4af9-9d17-0052b713c596",
     "Gantry": "896df029-2cce-430b-b1a6-e721afc4387c",
     "Unipole": "e5975665-4295-4029-8273-2897db7983b8",
-    "Metro Pillar": "3f2a9d6c-8b41-4f2e-9c7d-1a6e2f9b4d51",
-    "Glass Facade": "3f2a9d6c-8b41-4f2e-9c7d-1a6e2f9b4d51",
+    "Metro_Pillar": "3f2a9d6c-8b41-4f2e-9c7d-1a6e2f9b4d51",
+    "Glass_Facade": "3f2a9d6c-8b41-4f2e-9c7d-1a6e2f9b4d51",
     "Facade": "a8c4e1b7-2f9d-4c6e-8b13-7d52f0a9c2e4",
-    "Water ATM": "6b91f5d2-0c7e-4a83-9e2d-14b6c8f3a705",
-    "Metro Panel": "d4e8a6c9-5f2b-4d17-b03a-9c7e1f6a82d5"
+    "Water_ATM": "6b91f5d2-0c7e-4a83-9e2d-14b6c8f3a705",
+    "Metro_Panel": "d4e8a6c9-5f2b-4d17-b03a-9c7e1f6a82d5",
+    "Minipole": "eeebe307-4b02-4856-94d3-9c7a2e005aeb",
+    "Display_Wall": "76d2ba2b-008d-4264-960d-281116d01140",
+    "Utility": "63cae134-128c-4243-93db-e7beba628d20",
+    "FOB_Panel": "eb712bc0-2848-4554-894d-5d95acd93bd8"
 }

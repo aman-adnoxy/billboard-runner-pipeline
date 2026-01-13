@@ -138,6 +138,16 @@ def parse_address(result):
 # ---------------------------
 # TITLE/DESCRIPTION
 # ---------------------------
+
+# Mapping from lighting type codes to proper display labels
+LIGHTING_LABELS = {
+    "FL": "Frontlit",
+    "BL": "Backlit",
+    "NL": "Non-lit",
+    "Digital": "Digital",
+    "Ambilit": "Ambient-lit",
+}
+
 def enhance_title_and_description(row, city, lighting_type):
     format_type = clean_text(row.get("format_type", ""))
     location = clean_text(row.get("location", ""))
@@ -155,11 +165,14 @@ def enhance_title_and_description(row, city, lighting_type):
     except:
         rate_str = "Price on Request"
 
-    lighting_label = lighting_type.capitalize()
+    # Convert lighting type code to proper label
+    lighting_label = LIGHTING_LABELS.get(lighting_type, lighting_type.capitalize() if lighting_type else "")
 
-    title = f"{format_type.replace('_', ' ')} in {location}, {city} ({size_info})"
+    format_type_cap = format_type.replace('_', ' ').capitalize()
+
+    title = f"{format_type_cap} in {location}, {city} ({size_info})"
     description = (
-        f"{lighting_label} {format_type.replace('_', ' ')} located at {location}, {city}. "
+        f"{lighting_label} {format_type_cap} located at {location}, {city}. "
         f"This unit measures {size_info} and is available at {rate_str} per month."
     )
 

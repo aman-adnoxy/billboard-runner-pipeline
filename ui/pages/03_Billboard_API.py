@@ -288,6 +288,10 @@ if running_flow and running_flow.get("is_active"):
     
     st.divider()
     st.info("⬇️ To start a new run, dismiss the running flow above first, then upload a new file below.")
+    
+    # IMPORTANT: Stop here to prevent starting a new pipeline when one is already running
+    # The rest of the page handles file upload and new pipeline execution
+    st.stop()
 
 # --- Main Processing Logic ---
 if uploaded_file:
@@ -403,17 +407,19 @@ if uploaded_file:
             est_time = total_batches * 10  # Rough estimate: 10 seconds per batch
             st.info(f"⏱️ **Estimated Time**: ~{est_time // 60} min {est_time % 60} sec")
 
-    # Run button
+    # Run button - only enable if no flow is actively running
+    # Note: If a flow is running (detected from Prefect), we would have hit st.stop() earlier
     run_col1, run_col2 = st.columns([1, 3])
     with run_col1:
         run_button = st.button(
             "🚀 Run Billboard API Pipeline",
             type="primary",
-            disabled=st.session_state.pipeline_running,
             use_container_width=True
         )
 
-    if run_button or st.session_state.pipeline_running:
+    # Only start pipeline when button is clicked - NOT based on session state from prior runs
+    # This prevents accidental re-execution on page refresh
+    if run_button:
         st.session_state.pipeline_running = True
         
         total_records = len(df)
