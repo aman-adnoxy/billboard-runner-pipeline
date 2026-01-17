@@ -22,11 +22,11 @@ st.set_page_config(
 # --- Header Section ---
 st.title("🔗 Database Sync")
 st.markdown("""
-This step connects **MongoDB** and **Supabase** databases to enrich billboard records with:
-- **Organization ID**: Links each billboard to an organization from Supabase.
-- **Market ID**: Maps billboard IDs to listing IDs in the marketplace.
+This step syncs **MongoDB** billboard data with **Supabase** listings to add:
+- **Organization ID**: Links each billboard to its organization
+- **Market ID**: The marketplace listing ID
 
-The sync process matches MongoDB documents with Supabase tables and updates the MongoDB records.
+The sync automatically matches MongoDB documents with Supabase listings using `source_iid` and `_id` fields.
 """)
 
 st.divider()
@@ -51,7 +51,7 @@ def check_supabase_connection():
         from src.database import get_supabase_client
         client = get_supabase_client()
         # Try a simple query
-        result = client.table("organizations").select("id").limit(1).execute()
+        result = client.table("listings").select("id").limit(1).execute()
         return True, "Connected"
     except Exception as e:
         return False, str(e)
@@ -80,50 +80,8 @@ with st.container():
 
 st.divider()
 
-# --- Organization Selection ---
-st.header("2️⃣ Select Organization")
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_organizations():
-    """Fetch all organizations from Supabase."""
-    try:
-        from src.database import get_supabase_client
-        client = get_supabase_client()
-        result = client.table("organizations").select("id, name").execute()
-        return result.data if result.data else []
-    except Exception as e:
-        st.error(f"Failed to fetch organizations: {e}")
-        return []
-
-organizations = fetch_organizations()
-
-if not organizations:
-    st.warning("⚠️ No organizations found in the database.")
-    st.stop()
-
-# Create organization selection dropdown
-org_options = {org['name']: org['id'] for org in organizations}
-org_names = list(org_options.keys())
-
-selected_org_name = st.selectbox(
-    "Select Organization",
-    options=org_names,
-    help="Choose the organization to associate with the billboard records"
-)
-
-selected_org_id = org_options[selected_org_name]
-
-# Display selected organization info
-with st.expander("📋 Selected Organization Details", expanded=False):
-    st.json({
-        "organization_name": selected_org_name,
-        "organization_id": selected_org_id
-    })
-
-st.divider()
-
 # --- Preview Section ---
-st.header("3️⃣ Data Preview")
+st.header("2️⃣ Data Preview")
 
 @st.cache_data(ttl=60)  # Cache for 1 minute
 def fetch_mongo_documents(limit=100):
@@ -179,13 +137,13 @@ with st.expander("👀 MongoDB Documents Preview", expanded=False):
 st.divider()
 
 # --- Sync Execution ---
-st.header("4️⃣ Execute Sync")
+st.header("3️⃣ Execute Sync")
 
 st.info("""
 **Sync Process:**
-1. Fetches all billboard IDs from MongoDB
-2. Matches each billboard ID with `source_id` in Supabase `listings` table
-3. Updates MongoDB documents with `organization_id` and `market_id`
+1. Fetches all listings from Supabase (id, source_iid, organization_id)
+2. Matches each listing's source_iid with MongoDB document _id
+3. Updates MongoDB with organization_id and market_id (from listings.id)
 """)
 
 # Session state for sync tracking
@@ -194,9 +152,10 @@ if 'sync_running' not in st.session_state:
 if 'sync_results' not in st.session_state:
     st.session_state.sync_results = None
 
-def run_database_sync(org_id: str, org_name: str):
+def run_database_sync():
     """
     Execute the database sync process.
+    Fetches organization_id and market_id from Supabase listings and syncs to MongoDB.
     
     Returns:
         dict: Summary of sync results
@@ -204,10 +163,10 @@ def run_database_sync(org_id: str, org_name: str):
     from src.database import collection, get_supabase_client
     
     results = {
-        "total_mongo_docs": 0,
+        "total_listings": 0,
         "matched": 0,
         "updated": 0,
-        "not_found": 0,
+        "not_found_in_mongo": 0,
         "errors": [],
         "not_found_ids": []
     }
@@ -216,54 +175,66 @@ def run_database_sync(org_id: str, org_name: str):
         # Get Supabase client
         supabase = get_supabase_client()
         
-        # Fetch all MongoDB document IDs
-        mongo_docs = list(collection.find({}, {"_id": 1}))
-        results["total_mongo_docs"] = len(mongo_docs)
+        # Fetch all listings from Supabase with required fields
+        # We need: id (for market_id), source_iid (to match with MongoDB _id), organization_id
+        all_listings = []
+        page_size = 1000
+        offset = 0
         
-        if not mongo_docs:
+        while True:
+            response = supabase.table("listings").select("id, source_iid, organization_id").range(offset, offset + page_size - 1).execute()
+            
+            if not response.data:
+                break
+            
+            all_listings.extend(response.data)
+            
+            if len(response.data) < page_size:
+                break
+            
+            offset += page_size
+        
+        results["total_listings"] = len(all_listings)
+        
+        if not all_listings:
             return results
         
-        # Get all billboard IDs
-        billboard_ids = [str(doc["_id"]) for doc in mongo_docs]
-        
-        # Fetch matching listings from Supabase in batches
-        # Supabase has limits on IN queries, so we batch them
-        batch_size = 50
-        listings_map = {}
-        
-        for i in range(0, len(billboard_ids), batch_size):
-            batch_ids = billboard_ids[i:i + batch_size]
-            try:
-                response = supabase.table("listings").select("id, source_iid").in_("source_iid", batch_ids).execute()
-                if response.data:
-                    for listing in response.data:
-                        listings_map[listing["source_iid"]] = listing["id"]
-            except Exception as e:
-                results["errors"].append(f"Batch {i//batch_size + 1}: {str(e)}")
-        
         # Update MongoDB documents
-        for billboard_id in billboard_ids:
-            market_id = listings_map.get(billboard_id)
+        for listing in all_listings:
+            source_iid = listing.get("source_iid")
+            market_id = listing.get("id")
+            organization_id = listing.get("organization_id")
             
-            if market_id:
+            # Skip if source_iid is missing
+            if not source_iid:
+                continue
+            
+            # Check if MongoDB document exists
+            mongo_doc = collection.find_one({"_id": source_iid})
+            
+            if mongo_doc:
                 results["matched"] += 1
                 try:
+                    # Update with both organization_id and market_id
+                    update_fields = {
+                        "market_id": market_id,
+                        "synced_at": datetime.utcnow()
+                    }
+                    
+                    # Only add organization_id if it exists
+                    if organization_id:
+                        update_fields["organization_id"] = organization_id
+                    
                     collection.update_one(
-                        {"_id": billboard_id},
-                        {
-                            "$set": {
-                                "organization_id": org_id,
-                                "market_id": market_id,
-                                "synced_at": datetime.utcnow()
-                            }
-                        }
+                        {"_id": source_iid},
+                        {"$set": update_fields}
                     )
                     results["updated"] += 1
                 except Exception as e:
-                    results["errors"].append(f"Update {billboard_id}: {str(e)}")
+                    results["errors"].append(f"Update {source_iid}: {str(e)}")
             else:
-                results["not_found"] += 1
-                results["not_found_ids"].append(billboard_id)
+                results["not_found_in_mongo"] += 1
+                results["not_found_ids"].append(source_iid)
         
         return results
         
@@ -272,13 +243,13 @@ def run_database_sync(org_id: str, org_name: str):
         return results
 
 # Sync options
-with st.expander("⚙️ Sync Options", expanded=False):
-    update_all = st.checkbox(
-        "Update all documents (including already synced)",
-        value=False,
-        help="If unchecked, only documents without organization_id/market_id will be updated"
-    )
-    st.info(f"**Selected Organization**: {selected_org_name} (`{selected_org_id}`)")
+with st.expander("⚙️ Sync Information", expanded=False):
+    st.markdown("""
+    - Syncs **all listings** from Supabase to MongoDB
+    - Matches using `source_iid` (Supabase) ↔ `_id` (MongoDB)
+    - Updates both `organization_id` and `market_id` fields
+    - Adds/updates `synced_at` timestamp
+    """)
 
 # Run button
 col1, col2 = st.columns([1, 3])
@@ -298,25 +269,22 @@ if run_button:
     status_container = st.status("🔄 Starting sync process...", expanded=True)
     
     with status_container:
-        st.write(f"📌 Organization: **{selected_org_name}**")
-        st.write(f"📌 Organization ID: `{selected_org_id}`")
-        
         start_time = time.time()
         
         # Phase 1: Fetching data
-        st.write("📥 Fetching MongoDB documents...")
-        progress_bar.progress(10)
+        st.write("📥 Fetching listings from Supabase...")
+        progress_bar.progress(20)
         
         # Phase 2: Matching
-        st.write("🔍 Matching with Supabase listings...")
-        progress_bar.progress(30)
+        st.write("🔍 Matching with MongoDB documents...")
+        progress_bar.progress(40)
         
         # Phase 3: Updating
         st.write("📝 Updating MongoDB documents...")
-        progress_bar.progress(50)
+        progress_bar.progress(60)
         
         # Run the sync
-        results = run_database_sync(selected_org_id, selected_org_name)
+        results = run_database_sync()
         
         progress_bar.progress(100)
         elapsed_time = time.time() - start_time
@@ -331,22 +299,22 @@ if run_button:
     
     result_cols = st.columns(4)
     with result_cols[0]:
-        st.metric("Total Documents", results["total_mongo_docs"])
+        st.metric("Total Listings", results["total_listings"])
     with result_cols[1]:
         st.metric("Matched", results["matched"])
     with result_cols[2]:
         st.metric("Updated", results["updated"])
     with result_cols[3]:
-        st.metric("Not Found", results["not_found"])
+        st.metric("Not in MongoDB", results["not_found_in_mongo"])
     
     # Success/Warning messages
     if results["updated"] > 0:
         st.success(f"✅ Successfully updated **{results['updated']}** documents with organization_id and market_id")
     
-    if results["not_found"] > 0:
-        st.warning(f"⚠️ **{results['not_found']}** billboard IDs were not found in Supabase listings")
+    if results["not_found_in_mongo"] > 0:
+        st.warning(f"⚠️ **{results['not_found_in_mongo']}** listings have source_iid values not found in MongoDB")
         
-        with st.expander("📋 Unmatched Billboard IDs", expanded=False):
+        with st.expander("📋 Unmatched Source IDs", expanded=False):
             if results["not_found_ids"]:
                 # Show first 50
                 st.write("First 50 unmatched IDs:")
@@ -370,13 +338,13 @@ elif st.session_state.sync_results:
     
     result_cols = st.columns(4)
     with result_cols[0]:
-        st.metric("Total Documents", results["total_mongo_docs"])
+        st.metric("Total Listings", results["total_listings"])
     with result_cols[1]:
         st.metric("Matched", results["matched"])
     with result_cols[2]:
         st.metric("Updated", results["updated"])
     with result_cols[3]:
-        st.metric("Not Found", results["not_found"])
+        st.metric("Not in MongoDB", results["not_found_in_mongo"])
     
     if st.button("🗑️ Clear Results"):
         st.session_state.sync_results = None
@@ -385,7 +353,7 @@ elif st.session_state.sync_results:
 st.divider()
 
 # --- Verification Section ---
-st.header("5️⃣ Verification")
+st.header("4️⃣ Verification")
 
 if st.button("🔍 Verify Synced Data"):
     from src.database import collection
