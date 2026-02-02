@@ -13,7 +13,10 @@ from src.prefect_utils import (
     save_flow_run_state,
     clear_flow_run_state,
     get_flow_run_status,
-    get_flow_run_progress
+    get_flow_run_progress,
+    pause_flow_run,
+    resume_flow_run,
+    cancel_flow_run
 )
 
 # --- Page Configuration ---
@@ -96,6 +99,8 @@ if 'last_run_time' not in st.session_state:
     st.session_state.last_run_time = None
 if 'flow_run_id' not in st.session_state:
     st.session_state.flow_run_id = None
+if 'skip_existing_docs' not in st.session_state:
+    st.session_state.skip_existing_docs = True  # Default to True to avoid reprocessing
 
 # --- Navigation Confirmation When Pipeline is Running ---
 # Inject JavaScript to warn user before navigating away during active pipeline
@@ -170,12 +175,21 @@ if running_flow and running_flow.get("is_active"):
     st.session_state.pipeline_running = True
     st.session_state.flow_run_id = running_flow.get("flow_run_id")
     
-    st.warning("🔄 **Active Pipeline Detected!**")
-    st.info("""
-    A Billboard API pipeline is currently running. This page was refreshed, but your 
-    flow continues to run in Prefect. You can monitor its progress below or dismiss it 
-    to start a new run.
-    """)
+    # Determine the status message based on flow state
+    flow_status = running_flow.get("status", {})
+    if flow_status.get("is_paused"):
+        st.warning("⏸️ **Pipeline Paused!**")
+        st.info("""
+        The Billboard API pipeline is currently paused. You can resume it below or stop it completely.
+        The flow will remain paused until you take action.
+        """)
+    else:
+        st.warning("🔄 **Active Pipeline Detected!**")
+        st.info("""
+        A Billboard API pipeline is currently running. This page was refreshed, but your 
+        flow continues to run in Prefect. You can monitor its progress below or dismiss it 
+        to start a new run.
+        """)
     
     # Display running flow information
     with st.expander("📊 Running Flow Details", expanded=True):
@@ -185,7 +199,14 @@ if running_flow and running_flow.get("is_active"):
         with col1:
             st.metric("Flow Run ID", running_flow.get("flow_run_id", "N/A")[:8] + "...")
         with col2:
-            st.metric("Status", flow_status.get("state_name", "Unknown"))
+            # Show status with color coding
+            status_name = flow_status.get("state_name", "Unknown")
+            if flow_status.get("is_paused"):
+                st.metric("Status", f"⏸️ {status_name}")
+            elif flow_status.get("is_cancelled"):
+                st.metric("Status", f"⏹️ {status_name}")
+            else:
+                st.metric("Status", status_name)
         with col3:
             started = running_flow.get("started_at", "Unknown")
             if started != "Unknown":
@@ -205,29 +226,98 @@ if running_flow and running_flow.get("is_active"):
         # Link to Prefect Dashboard
         flow_run_id = running_flow.get("flow_run_id", "")
         st.markdown(f"🔗 [View in Prefect Cloud](https://app.prefect.cloud/flow-runs/{flow_run_id})")
+
     
     # Actions for running flow
     st.subheader("Actions")
-    action_col1, action_col2, action_col3 = st.columns(3)
+    
+    # Get current flow status to determine which buttons to show
+    flow_status = running_flow.get("status", {})
+    is_paused = flow_status.get("is_paused", False)
+    is_running_active = flow_status.get("is_running", False)
+    
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
     
     with action_col1:
         if st.button("🔄 Refresh Status", use_container_width=True):
             st.rerun()
     
     with action_col2:
-        # Auto-refresh toggle
-        auto_refresh = st.checkbox("Auto-refresh (every 5s)", value=False)
-        if auto_refresh:
-            time.sleep(5)
-            st.rerun()
+        # Show Pause button only if flow is actively running (not paused)
+        if is_running_active and not is_paused:
+            if st.button("⏸️ Pause", type="secondary", use_container_width=True):
+                with st.spinner("Pausing flow..."):
+                    success = pause_flow_run(running_flow.get("flow_run_id"))
+                    if success:
+                        st.success("✅ Flow paused successfully!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to pause flow. Check Prefect Cloud for details.")
+        # Show Resume button if flow is paused
+        elif is_paused:
+            if st.button("▶️ Resume", type="primary", use_container_width=True):
+                with st.spinner("Resuming flow..."):
+                    success = resume_flow_run(running_flow.get("flow_run_id"))
+                    if success:
+                        st.success("✅ Flow resumed successfully!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to resume flow. Check Prefect Cloud for details.")
+        else:
+            st.button("⏸️ Pause", disabled=True, use_container_width=True, help="Flow is not in a pausable state")
     
     with action_col3:
+        # Stop button - available for running or paused flows
+        if is_running_active or is_paused:
+            if st.button("⏹️ Stop", type="secondary", use_container_width=True, help="Cancel the running flow"):
+                # Confirmation dialog using session state
+                if 'confirm_stop' not in st.session_state:
+                    st.session_state.confirm_stop = True
+                    st.rerun()
+        else:
+            st.button("⏹️ Stop", disabled=True, use_container_width=True, help="No active flow to stop")
+    
+    with action_col4:
         if st.button("❌ Dismiss & Start New", type="secondary", use_container_width=True):
             clear_flow_run_state()
             st.session_state.pipeline_running = False
             st.session_state.flow_run_id = None
             st.success("Flow tracking cleared. You can now start a new run.")
             st.rerun()
+    
+    # Handle stop confirmation
+    if st.session_state.get('confirm_stop', False):
+        st.warning("⚠️ **Confirm Stop Action**")
+        st.markdown("Are you sure you want to stop this flow? This action cannot be undone.")
+        
+        confirm_col1, confirm_col2, confirm_col3 = st.columns([1, 1, 2])
+        with confirm_col1:
+            if st.button("✅ Yes, Stop Flow", type="primary"):
+                with st.spinner("Stopping flow..."):
+                    success = cancel_flow_run(running_flow.get("flow_run_id"))
+                    if success:
+                        st.success("✅ Flow stopped successfully!")
+                        clear_flow_run_state()
+                        st.session_state.pipeline_running = False
+                        st.session_state.flow_run_id = None
+                        st.session_state.confirm_stop = False
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to stop flow. Check Prefect Cloud for details.")
+                        st.session_state.confirm_stop = False
+        with confirm_col2:
+            if st.button("❌ Cancel"):
+                st.session_state.confirm_stop = False
+                st.rerun()
+    
+    # Auto-refresh toggle (moved below confirmation dialog)
+    auto_refresh = st.checkbox("Auto-refresh (every 5s)", value=False)
+    if auto_refresh:
+        time.sleep(5)
+        st.rerun()
     
     # Show progress if we can get it
     st.subheader("📈 Live Progress")
@@ -398,7 +488,7 @@ if uploaded_file:
     st.header("4️⃣ Execute Pipeline")
     
     # Configuration options
-    with st.expander("⚙️ Execution Options", expanded=False):
+    with st.expander("⚙️ Execution Options", expanded=True):
         batch_info_col1, batch_info_col2 = st.columns(2)
         with batch_info_col1:
             total_batches = -(-len(df) // 25)  # Ceiling division
@@ -406,6 +496,21 @@ if uploaded_file:
         with batch_info_col2:
             est_time = total_batches * 10  # Rough estimate: 10 seconds per batch
             st.info(f"⏱️ **Estimated Time**: ~{est_time // 60} min {est_time % 60} sec")
+        
+        st.divider()
+        
+        # Skip existing documents toggle
+        skip_existing = st.checkbox(
+            "⏭️ Skip Already Processed Documents",
+            value=st.session_state.skip_existing_docs,
+            help="Check MongoDB for existing billboard IDs and skip reprocessing them. Uncheck to reprocess all records."
+        )
+        st.session_state.skip_existing_docs = skip_existing
+        
+        if skip_existing:
+            st.success("✅ Will check MongoDB and skip existing billboard IDs")
+        else:
+            st.warning("⚠️ Will reprocess all records, even if they already exist in MongoDB")
 
     # Run button - only enable if no flow is actively running
     # Note: If a flow is running (detected from Prefect), we would have hit st.stop() earlier
@@ -518,10 +623,19 @@ if uploaded_file:
                     "billboard_api_runner.py"
                 )
                 
+                
                 cmd = [sys.executable, runner_script, input_csv_path, output_json_path]
+                
+                # Add skip-existing flag if enabled
+                if st.session_state.skip_existing_docs:
+                    cmd.append("--skip-existing")
+                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ⏭️ Skip existing documents: ENABLED")
+                else:
+                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🔄 Skip existing documents: DISABLED (will reprocess all)")
                 
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting subprocess...")
                 log_placeholder.code("\n".join(logs[-50:]))
+
                 
                 st.write("🔄 Running Billboard API Pipeline...")
                 

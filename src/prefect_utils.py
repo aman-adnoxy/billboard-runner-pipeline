@@ -90,8 +90,10 @@ async def get_flow_run_status_async(flow_run_id: str) -> Optional[Dict[str, Any]
                 "state_name": flow_run.state_name,
                 "state_type": flow_run.state_type.value if flow_run.state_type else None,
                 "is_running": flow_run.state_name in ["Running", "Pending", "Scheduled"],
+                "is_paused": flow_run.state_name == "Paused",
                 "is_completed": flow_run.state_name == "Completed",
                 "is_failed": flow_run.state_name in ["Failed", "Crashed", "Cancelled"],
+                "is_cancelled": flow_run.state_name == "Cancelled",
                 "start_time": flow_run.start_time.isoformat() if flow_run.start_time else None,
                 "end_time": flow_run.end_time.isoformat() if flow_run.end_time else None,
                 "total_task_run_count": flow_run.total_task_run_count,
@@ -218,7 +220,7 @@ def check_and_get_running_flow() -> Optional[Dict[str, Any]]:
         }
     
     # If the flow is no longer running, we might want to clean up
-    if status.get("is_completed") or status.get("is_failed"):
+    if status.get("is_completed") or (status.get("is_failed") and not status.get("is_paused")):
         # Flow finished - return final status but don't auto-clear
         # Let the UI handle cleanup after displaying final status
         return {
@@ -227,8 +229,8 @@ def check_and_get_running_flow() -> Optional[Dict[str, Any]]:
             "is_active": False
         }
     
-    # Flow is still running
-    if status.get("is_running"):
+    # Flow is still running or paused
+    if status.get("is_running") or status.get("is_paused"):
         # Update last checked time
         saved_state["last_checked"] = datetime.utcnow().isoformat()
         save_flow_run_state(**{k: v for k, v in saved_state.items() if k != "last_checked"})
@@ -281,3 +283,167 @@ def get_flow_run_progress(flow_run_id: str) -> Dict[str, Any]:
         "is_completed": status.get("is_completed", False),
         "is_failed": status.get("is_failed", False)
     }
+
+
+async def pause_flow_run_async(flow_run_id: str) -> bool:
+    """
+    Pause a running flow (async version).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from prefect.client.orchestration import get_client
+        from prefect.client.schemas.actions import FlowRunUpdate
+        from prefect.client.schemas.objects import StateType
+        
+        async with get_client() as client:
+            # Set the flow run to paused state
+            await client.set_flow_run_state(
+                flow_run_id=flow_run_id,
+                state={
+                    "type": "PAUSED",
+                    "name": "Paused",
+                    "message": "Flow paused by user"
+                },
+                force=True
+            )
+            return True
+    except Exception as e:
+        print(f"Error pausing flow run: {e}")
+        return False
+
+
+def pause_flow_run(flow_run_id: str) -> bool:
+    """
+    Pause a running flow (sync wrapper).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, pause_flow_run_async(flow_run_id))
+                return future.result(timeout=30)
+        except RuntimeError:
+            return asyncio.run(pause_flow_run_async(flow_run_id))
+    except Exception as e:
+        print(f"Error in sync wrapper: {e}")
+        return False
+
+
+async def resume_flow_run_async(flow_run_id: str) -> bool:
+    """
+    Resume a paused flow (async version).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from prefect.client.orchestration import get_client
+        
+        async with get_client() as client:
+            # Set the flow run back to running state
+            await client.set_flow_run_state(
+                flow_run_id=flow_run_id,
+                state={
+                    "type": "RUNNING",
+                    "name": "Running",
+                    "message": "Flow resumed by user"
+                },
+                force=True
+            )
+            return True
+    except Exception as e:
+        print(f"Error resuming flow run: {e}")
+        return False
+
+
+def resume_flow_run(flow_run_id: str) -> bool:
+    """
+    Resume a paused flow (sync wrapper).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, resume_flow_run_async(flow_run_id))
+                return future.result(timeout=30)
+        except RuntimeError:
+            return asyncio.run(resume_flow_run_async(flow_run_id))
+    except Exception as e:
+        print(f"Error in sync wrapper: {e}")
+        return False
+
+
+async def cancel_flow_run_async(flow_run_id: str) -> bool:
+    """
+    Cancel a running flow (async version).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from prefect.client.orchestration import get_client
+        
+        async with get_client() as client:
+            # Set the flow run to cancelled state
+            await client.set_flow_run_state(
+                flow_run_id=flow_run_id,
+                state={
+                    "type": "CANCELLED",
+                    "name": "Cancelled",
+                    "message": "Flow cancelled by user"
+                },
+                force=True
+            )
+            return True
+    except Exception as e:
+        print(f"Error cancelling flow run: {e}")
+        return False
+
+
+def cancel_flow_run(flow_run_id: str) -> bool:
+    """
+    Cancel a running flow (sync wrapper).
+    
+    Args:
+        flow_run_id: The Prefect flow run ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, cancel_flow_run_async(flow_run_id))
+                return future.result(timeout=30)
+        except RuntimeError:
+            return asyncio.run(cancel_flow_run_async(flow_run_id))
+    except Exception as e:
+        print(f"Error in sync wrapper: {e}")
+        return False

@@ -56,6 +56,34 @@ def get_supabase_client() -> Client:
     client: Client = create_client(SUPABASE_URL, SUPABASE_KEY, options=opts)
     return client
 
+def get_existing_billboard_ids(billboard_ids: list) -> set:
+    """
+    Check which billboard IDs already exist in MongoDB.
+    
+    Args:
+        billboard_ids: List of billboard IDs to check
+        
+    Returns:
+        Set of billboard IDs that already exist in the database
+    """
+    if not billboard_ids:
+        return set()
+    
+    try:
+        # Query MongoDB for existing documents with these IDs
+        existing_docs = collection.find(
+            {"_id": {"$in": billboard_ids}},
+            {"_id": 1}  # Only return the _id field
+        )
+        
+        # Extract the IDs into a set
+        existing_ids = {doc["_id"] for doc in existing_docs}
+        return existing_ids
+    except Exception as e:
+        print(f"Error checking existing billboard IDs: {e}")
+        return set()
+
+
 def upsert_billboard_profiles(results: list):
 
     for r in results:
